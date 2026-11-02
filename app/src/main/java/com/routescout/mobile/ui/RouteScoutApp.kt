@@ -647,7 +647,7 @@ private fun ServerPreviewPanel(onOpenServers: () -> Unit) {
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            "Для иностранного IP потребуется собственный VPS или конфигурация VPN-провайдера.",
+            "Можно импортировать WireGuard-профиль или открыть бесплатный общественный OpenVPN-сервер из каталога VPN Gate.",
             color = RouteMuted,
             fontSize = 12.sp,
             lineHeight = 18.sp
@@ -810,8 +810,8 @@ private fun SettingsScreen() {
         Panel {
             Text("Версия приложения", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(6.dp))
-            Text("RouteScout Mobile 0.1.0", color = RouteMuted, fontSize = 12.sp)
-            Text("Начальная сборка интерфейса и диагностики сети", color = RouteMuted, fontSize = 11.sp)
+            Text("RouteScout Mobile 0.2.0", color = RouteMuted, fontSize = 12.sp)
+            Text("Каталог бесплатных VPN Gate и импорт WireGuard", color = RouteMuted, fontSize = 11.sp)
         }
     }
 }
