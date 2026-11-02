@@ -4,7 +4,7 @@ Android application for network diagnostics, VPN profile management, and intelli
 
 ## Current status
 
-**0.3.0 — free provider workflows**
+**0.4.0 — free providers and verified network diagnostics**
 
 Implemented in this branch:
 - Native Android project using Kotlin and Jetpack Compose.
@@ -12,7 +12,7 @@ Implemented in this branch:
 - Mobile navigation for Overview, Servers, Diagnostics, and Settings.
 - Real on-device baseline checks for Android network validation, DNS resolution, and HTTPS reachability to example.com.
 - GitHub Actions workflow to build a debug APK.
-- Official VPN Gate public relay catalog fetched over HTTPS.
+- Official VPN Gate public relay catalog fetched over HTTPS and automatically refreshed when the server screen is reopened after 15 minutes.
 - CSV parsing with quoted-field support, profile validation, and duplicate removal.
 - Server ranking based on VPN Gate's published score, ping, and throughput.
 - On-demand TCP endpoint checks from the device; UDP is explicitly marked unverified until an actual VPN handshake.

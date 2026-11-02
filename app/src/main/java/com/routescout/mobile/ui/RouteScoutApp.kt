@@ -106,6 +106,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
+private const val FREE_SERVER_REFRESH_INTERVAL_MS = 15 * 60 * 1000L
+
 private enum class AppTab(val title: String) {
     OVERVIEW("Обзор"),
     SERVERS("Серверы"),
@@ -131,6 +133,7 @@ fun RouteScoutApp() {
     var isLoadingFreeServers by remember { mutableStateOf(false) }
     var freeServersError by remember { mutableStateOf<String?>(null) }
     var freeServersUpdated by remember { mutableStateOf<String?>(null) }
+    var freeServersFetchedAtMs by remember { mutableStateOf<Long?>(null) }
     var freeServerActionMessage by remember { mutableStateOf<String?>(null) }
     var exportingServerKey by remember { mutableStateOf<String?>(null) }
     var snapshot by remember { mutableStateOf(DiagnosticSnapshot()) }
@@ -283,6 +286,7 @@ fun RouteScoutApp() {
                 freeServersError = null
                 try {
                     freeServers = vpnGateRepository.refresh()
+                    freeServersFetchedAtMs = System.currentTimeMillis()
                     freeServersUpdated = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 } catch (error: Exception) {
                     freeServersError = error.message?.take(160) ?: "Не удалось обновить каталог VPN Gate"
@@ -333,7 +337,10 @@ fun RouteScoutApp() {
     }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab == AppTab.SERVERS && freeServers.isEmpty() && !isLoadingFreeServers) {
+        val lastFetch = freeServersFetchedAtMs
+        val catalogIsStale = lastFetch == null ||
+            System.currentTimeMillis() - lastFetch >= FREE_SERVER_REFRESH_INTERVAL_MS
+        if (selectedTab == AppTab.SERVERS && catalogIsStale && !isLoadingFreeServers) {
             refreshFreeServers()
         }
     }
@@ -1179,7 +1186,7 @@ private fun FreeVpnServerCard(
                 fontSize = 10.sp
             )
             if (server.logType.isNotBlank()) {
-                Text("Политика логов в каталоге: ${server.logType}", color = RouteMuted, fontSize = 9.sp)
+                Text(formatLogType(server.logType), color = RouteMuted, fontSize = 9.sp)
             }
             healthResult?.let { result ->
                 val resultText = when (result) {
@@ -1247,6 +1254,12 @@ private fun countryFlag(countryCode: String): String {
     return countryCode.uppercase().map { character ->
         String(Character.toChars(0x1F1E6 + character.code - 'A'.code))
     }.joinToString("")
+}
+
+private fun formatLogType(value: String): String = when (value.lowercase(Locale.ROOT)) {
+    "2weeks" -> "Логи: 2 недели"
+    "none" -> "Логи не указаны в каталоге"
+    else -> "Логи: " + value
 }
 
 private fun formatServerSpeed(bitsPerSecond: Long): String =
@@ -1343,7 +1356,7 @@ private fun DiagnosticsScreen(
             }
         }
         Text(
-            "Важно: это базовая проверка DNS и HTTPS, а не полный тест VPN, скорости или утечек.",
+            "Проверяются интернет, DNS, HTTPS и внешний IP. Это ещё не полный тест скорости, jitter, потерь пакетов или DNS-утечек.",
             color = RouteMuted,
             fontSize = 11.sp,
             lineHeight = 16.sp
@@ -1369,7 +1382,7 @@ private fun SettingsScreen() {
         Panel {
             Text("Версия приложения", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(6.dp))
-            Text("RouteScout Mobile 0.3.0", color = RouteMuted, fontSize = 12.sp)
+            Text("RouteScout Mobile 0.4.0", color = RouteMuted, fontSize = 12.sp)
             Text("VPN Gate и Proton Free · WireGuard", color = RouteMuted, fontSize = 11.sp)
         }
     }

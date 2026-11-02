@@ -155,7 +155,7 @@ class NetworkDiagnosticsRepository(context: Context) {
         connection.requestMethod = "GET"
         connection.useCaches = false
         connection.setRequestProperty("Accept", "application/json, text/plain")
-        connection.setRequestProperty("User-Agent", "RouteScoutMobile/0.3.0")
+        connection.setRequestProperty("User-Agent", "RouteScoutMobile/0.4.0")
 
         return try {
             if (connection.responseCode !in 200..299) return null

@@ -42,6 +42,7 @@ class ServerHealthChecker {
             ?.trim()
             ?.substringAfter(' ')
             ?.lowercase()
+            ?: remote.getOrNull(3)?.lowercase()
             ?: "udp"
 
         if (!transport.contains("tcp")) {
