@@ -4,7 +4,7 @@ Android application for network diagnostics, VPN profile management, and intelli
 
 ## Current status
 
-**0.2.0 — free server catalog milestone**
+**0.3.0 — free provider workflows**
 
 Implemented in this branch:
 - Native Android project using Kotlin and Jetpack Compose.
@@ -18,9 +18,11 @@ Implemented in this branch:
 - Temporary .ovpn profile export through Android FileProvider.
 - OpenVPN profile filtering that removes local script/plugin/management directives and rejects external certificate paths.
 - Unit tests for CSV parsing and server selection.
+- Proton VPN Free setup path using the existing in-app WireGuard backend after the user downloads a configuration from the official account portal.
 
 Not implemented yet:
 - An embedded OpenVPN engine. VPN Gate profiles are currently handed off to an installed OpenVPN client; RouteScout does not yet own that OpenVPN tunnel.
+- Automated Proton account authentication/configuration retrieval. Proton's official account portal is used for config generation; RouteScout does not scrape private endpoints or store Proton credentials.
 - Real in-app connection state and handshake verification for VPN Gate servers.
 - Automatic server failover after an OpenVPN tunnel drops.
 - Foreign IP verification and automatic IP switching.
@@ -30,6 +32,13 @@ Not implemented yet:
 The UI deliberately does not invent server locations, connection states, ping values, or foreign IP addresses.
 
 ## Important infrastructure note
+
+### Free provider workflows
+
+- **VPN Gate:** public volunteer relay directory, dynamic server list, OpenVPN profile export. An installed OpenVPN client is currently required for the handoff.
+- **Proton VPN Free:** requires a free Proton account. The official portal can generate a WireGuard configuration on the Free plan; import the downloaded .conf into RouteScout to use its built-in WireGuard engine. The Free plan has one simultaneous device and free locations in ten countries; Proton states there are no data or time limits. The account portal is user-operated; RouteScout does not automate sign-in.
+
+Windscribe's official configuration generator requires a paid account, so it is not represented as a free third-party-config provider.
 
 The free-server catalog uses the official VPN Gate public directory. Its relays are operated by volunteers, not by RouteScout. Availability, speed, and trustworthiness vary; do not send passwords or sensitive traffic through an untrusted relay. The directory's ping and score are upstream measurements, not measurements from the user's device.
 

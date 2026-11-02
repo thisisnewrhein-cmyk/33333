@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -840,6 +841,46 @@ private fun ServersScreen(
             }
         }
         Panel {
+            Text("Proton VPN Free", color = RouteText, fontSize = 20.sp, fontFamily = FontFamily.Serif)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Официальный бесплатный тариф: без лимита трафика и времени, но требуется бесплатный аккаунт. Одновременно разрешено одно устройство.",
+                color = RouteMuted,
+                fontSize = 11.sp,
+                lineHeight = 16.sp
+            )
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "Бесплатные страны: Нидерланды, Япония, Румыния, Польша, Норвегия, Швейцария, Сингапур, Мексика, Канада и США.",
+                color = RouteMuted,
+                fontSize = 11.sp,
+                lineHeight = 16.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://account.protonvpn.com/downloads"))
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0x2238D7D0),
+                    contentColor = RouteCyan
+                )
+            ) {
+                Text("Получить бесплатный WireGuard-профиль")
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Порядок: открой портал Proton → Downloads → WireGuard configuration → скачай .conf → вернись сюда и нажми «Импортировать WireGuard .conf». После импорта RouteScout подключается собственным WireGuard-движком. Отдельное VPN-приложение не требуется.",
+                color = RouteMuted,
+                fontSize = 10.sp,
+                lineHeight = 15.sp
+            )
+        }
+        Panel {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Бесплатные серверы", color = RouteText, fontSize = 20.sp, fontFamily = FontFamily.Serif)
@@ -1075,8 +1116,8 @@ private fun SettingsScreen() {
         Panel {
             Text("Версия приложения", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(6.dp))
-            Text("RouteScout Mobile 0.2.0", color = RouteMuted, fontSize = 12.sp)
-            Text("Каталог бесплатных VPN Gate и импорт WireGuard", color = RouteMuted, fontSize = 11.sp)
+            Text("RouteScout Mobile 0.3.0", color = RouteMuted, fontSize = 12.sp)
+            Text("VPN Gate и Proton Free · WireGuard", color = RouteMuted, fontSize = 11.sp)
         }
     }
 }
