@@ -92,6 +92,8 @@ import com.routescout.mobile.vpn.FreeVpnServer
 import com.routescout.mobile.vpn.VpnGateRepository
 import com.routescout.mobile.vpn.VpnGateProfileExporter
 import com.routescout.mobile.vpn.ServerSelectionEngine
+import com.routescout.mobile.vpn.ServerHealthChecker
+import com.routescout.mobile.vpn.ServerHealthResult
 import com.routescout.mobile.vpn.ProtonFreeProvider
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.config.Config
@@ -118,8 +120,12 @@ fun RouteScoutApp() {
     val wireGuardManager = remember(context) { WireGuardManager(context) }
     val vpnGateRepository = remember { VpnGateRepository() }
     val profileExporter = remember(context) { VpnGateProfileExporter(context) }
+    val serverHealthChecker = remember { ServerHealthChecker() }
 
     var selectedTab by remember { mutableStateOf(AppTab.OVERVIEW) }
+    var serverHealthResults by remember { mutableStateOf<Map<String, ServerHealthResult>>(emptyMap()) }
+    var checkingServerKey by remember { mutableStateOf<String?>(null) }
+    var isAutoSelectingServer by remember { mutableStateOf(false) }
     var freeServers by remember { mutableStateOf<List<FreeVpnServer>>(emptyList()) }
     var isLoadingFreeServers by remember { mutableStateOf(false) }
     var freeServersError by remember { mutableStateOf<String?>(null) }
@@ -326,6 +332,74 @@ fun RouteScoutApp() {
         }
     }
 
+    val checkFreeServer: (FreeVpnServer) -> Unit = { server ->
+        if (checkingServerKey == null && !isAutoSelectingServer) {
+            scope.launch {
+                checkingServerKey = server.key
+                try {
+                    val result = serverHealthChecker.check(server)
+                    serverHealthResults = serverHealthResults + (server.key to result)
+                } catch (error: Exception) {
+                    serverHealthResults = serverHealthResults + (
+                        server.key to ServerHealthResult.TcpUnreachable(
+                            error.message ?: "Проверка не выполнена"
+                        )
+                    )
+                } finally {
+                    checkingServerKey = null
+                }
+            }
+        }
+    }
+
+    val autoSelectFreeServer: () -> Unit = {
+        if (!isAutoSelectingServer && exportingServerKey == null && freeServers.isNotEmpty()) {
+            scope.launch {
+                isAutoSelectingServer = true
+                freeServerActionMessage = "AUTO: проверяю до пяти серверов по рейтингу каталога…"
+                checkingServerKey = null
+                var selectedTcpServer: FreeVpnServer? = null
+                var fallbackUdpServer: FreeVpnServer? = null
+                try {
+                    val candidates = ServerSelectionEngine.rankedServers(freeServers).take(5)
+                    for (server in candidates) {
+                        checkingServerKey = server.key
+                        val result = serverHealthChecker.check(server)
+                        serverHealthResults = serverHealthResults + (server.key to result)
+                        when (result) {
+                            is ServerHealthResult.TcpReachable -> {
+                                selectedTcpServer = server
+                                break
+                            }
+                            ServerHealthResult.UdpRequiresHandshake -> {
+                                if (fallbackUdpServer == null) fallbackUdpServer = server
+                            }
+                            is ServerHealthResult.TcpUnreachable,
+                            ServerHealthResult.InvalidProfile -> Unit
+                        }
+                    }
+
+                    val selectedServer = selectedTcpServer ?: fallbackUdpServer
+                    if (selectedServer != null) {
+                        freeServerActionMessage = if (selectedTcpServer != null) {
+                            "Найден TCP endpoint, доступный с этого устройства. Передаю профиль в OpenVPN-клиент…"
+                        } else {
+                            "У первых серверов нет проверяемого TCP endpoint. Выбран UDP-сервер; его доступность подтвердится только после реального handshake."
+                        }
+                        openFreeServerProfile(selectedServer)
+                    } else {
+                        freeServerActionMessage = "Первые пять серверов не прошли TCP-проверку, а проверяемый UDP-профиль не найден."
+                    }
+                } catch (error: Exception) {
+                    freeServerActionMessage = error.message?.take(160) ?: "AUTO не смог проверить серверы."
+                } finally {
+                    checkingServerKey = null
+                    isAutoSelectingServer = false
+                }
+            }
+        }
+    }
+
     val runDiagnostics: () -> Unit = {
         if (!isChecking) {
             scope.launch {
@@ -378,7 +452,12 @@ fun RouteScoutApp() {
                         freeServersUpdated = freeServersUpdated,
                         freeServerActionMessage = freeServerActionMessage,
                         exportingServerKey = exportingServerKey,
+                        serverHealthResults = serverHealthResults,
+                        checkingServerKey = checkingServerKey,
+                        isAutoSelectingServer = isAutoSelectingServer,
                         onRefreshFreeServers = refreshFreeServers,
+                        onCheckFreeServer = checkFreeServer,
+                        onAutoSelectFreeServer = autoSelectFreeServer,
                         onOpenFreeServerProfile = openFreeServerProfile,
                         profileImported = profileImported,
                         profileEndpoint = profileEndpoint,
@@ -811,7 +890,12 @@ private fun ServersScreen(
     freeServersUpdated: String?,
     freeServerActionMessage: String?,
     exportingServerKey: String?,
+    serverHealthResults: Map<String, ServerHealthResult>,
+    checkingServerKey: String?,
+    isAutoSelectingServer: Boolean,
     onRefreshFreeServers: () -> Unit,
+    onCheckFreeServer: (FreeVpnServer) -> Unit,
+    onAutoSelectFreeServer: () -> Unit,
     onOpenFreeServerProfile: (FreeVpnServer) -> Unit,
     profileImported: Boolean,
     profileEndpoint: String?,
@@ -968,7 +1052,7 @@ private fun ServersScreen(
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                "Каталог загружается из официального API VPN Gate. Ping и рейтинг предоставлены самим каталогом, а не измерены этим телефоном.",
+                "Каталог загружается из официального API VPN Gate. Ping и рейтинг — данные каталога. Для TCP доступности есть отдельная проверка с устройства; UDP можно подтвердить только реальным handshake.",
                 color = RouteMuted,
                 fontSize = 11.sp,
                 lineHeight = 16.sp
@@ -994,8 +1078,8 @@ private fun ServersScreen(
                 val bestServer = ServerSelectionEngine.bestServer(freeServers)
                 if (bestServer != null) {
                     Button(
-                        onClick = { onOpenFreeServerProfile(bestServer) },
-                        enabled = exportingServerKey == null,
+                        onClick = onAutoSelectFreeServer,
+                        enabled = exportingServerKey == null && !isAutoSelectingServer && checkingServerKey == null,
                         modifier = Modifier.fillMaxWidth().height(44.dp),
                         shape = RoundedCornerShape(13.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -1003,7 +1087,10 @@ private fun ServersScreen(
                             contentColor = RouteBackground
                         )
                     ) {
-                        Text("AUTO · открыть лучший сервер", fontWeight = FontWeight.Bold)
+                        Text(
+                            if (isAutoSelectingServer) "AUTO · проверяю серверы…" else "AUTO · проверить и открыть лучший",
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -1014,7 +1101,10 @@ private fun ServersScreen(
                     items(freeServers, key = { it.key }) { server ->
                         FreeVpnServerCard(
                             server = server,
-                            isBusy = exportingServerKey != null,
+                            healthResult = serverHealthResults[server.key],
+                            isBusy = exportingServerKey != null || isAutoSelectingServer,
+                            isCheckingHealth = checkingServerKey == server.key,
+                            onCheckHealth = { onCheckFreeServer(server) },
                             onOpenProfile = { onOpenFreeServerProfile(server) }
                         )
                     }
@@ -1047,7 +1137,10 @@ private fun ServersScreen(
 @Composable
 private fun FreeVpnServerCard(
     server: FreeVpnServer,
+    healthResult: ServerHealthResult?,
     isBusy: Boolean,
+    isCheckingHealth: Boolean,
+    onCheckHealth: () -> Unit,
     onOpenProfile: () -> Unit
 ) {
     Surface(
@@ -1080,7 +1173,41 @@ private fun FreeVpnServerCard(
             if (server.logType.isNotBlank()) {
                 Text("Политика логов в каталоге: ${server.logType}", color = RouteMuted, fontSize = 9.sp)
             }
+            healthResult?.let { result ->
+                val resultText = when (result) {
+                    is ServerHealthResult.TcpReachable -> "TCP доступен с устройства · ${result.latencyMs} ms"
+                    is ServerHealthResult.TcpUnreachable -> "TCP недоступен: ${result.reason.take(70)}"
+                    ServerHealthResult.UdpRequiresHandshake -> "UDP: проверка возможна только после реального handshake"
+                    ServerHealthResult.InvalidProfile -> "Некорректный OpenVPN-профиль"
+                }
+                val resultColor = when (result) {
+                    is ServerHealthResult.TcpReachable -> RouteCyan
+                    is ServerHealthResult.TcpUnreachable, ServerHealthResult.InvalidProfile -> RouteCoralSoft
+                    ServerHealthResult.UdpRequiresHandshake -> RouteMuted
+                }
+                Text(resultText, color = resultColor, fontSize = 10.sp, lineHeight = 14.sp)
+                Spacer(Modifier.height(7.dp))
+            }
             Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = onCheckHealth,
+                enabled = !isBusy && !isCheckingHealth,
+                modifier = Modifier.fillMaxWidth().height(34.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = RouteSurfaceRaised,
+                    contentColor = RouteBlue
+                )
+            ) {
+                if (isCheckingHealth) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = RouteBlue)
+                    Spacer(Modifier.width(7.dp))
+                    Text("Проверяю endpoint…", fontSize = 10.sp)
+                } else {
+                    Text(if (healthResult == null) "Проверить доступность" else "Проверить ещё раз", fontSize = 10.sp)
+                }
+            }
+            Spacer(Modifier.height(7.dp))
             Button(
                 onClick = onOpenProfile,
                 enabled = !isBusy,

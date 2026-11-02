@@ -5,11 +5,11 @@ package com.routescout.mobile.vpn
  * These are VPN Gate directory measurements, not measurements performed by this device.
  */
 object ServerSelectionEngine {
-    fun bestServer(
+    fun rankedServers(
         servers: List<FreeVpnServer>,
         countryCode: String? = null
-    ): FreeVpnServer? {
-        val candidates = servers.asSequence()
+    ): List<FreeVpnServer> {
+        return servers.asSequence()
             .filter { it.openVpnConfigBase64.isNotBlank() }
             .filter { countryCode == null || it.countryCode.equals(countryCode, ignoreCase = true) }
             .sortedWith(
@@ -18,6 +18,11 @@ object ServerSelectionEngine {
                     .thenByDescending { it.speedBitsPerSecond ?: 0L }
                     .thenByDescending { it.uptimeSeconds }
             )
-        return candidates.firstOrNull()
+            .toList()
     }
+
+    fun bestServer(
+        servers: List<FreeVpnServer>,
+        countryCode: String? = null
+    ): FreeVpnServer? = rankedServers(servers, countryCode).firstOrNull()
 }

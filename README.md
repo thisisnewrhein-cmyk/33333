@@ -15,6 +15,8 @@ Implemented in this branch:
 - Official VPN Gate public relay catalog fetched over HTTPS.
 - CSV parsing with quoted-field support, profile validation, and duplicate removal.
 - Server ranking based on VPN Gate's published score, ping, and throughput.
+- On-demand TCP endpoint checks from the device; UDP is explicitly marked unverified until an actual VPN handshake.
+- AUTO preflight of up to five top-ranked candidates, preferring a TCP endpoint that is reachable from the device and falling back to an unverified UDP profile only when needed.
 - Temporary .ovpn profile export through Android FileProvider.
 - OpenVPN profile filtering that removes local script/plugin/management directives and rejects external certificate paths.
 - Unit tests for CSV parsing, server selection, and WireGuard handshake evidence.
@@ -40,7 +42,7 @@ The UI deliberately does not invent server locations, connection states, ping va
 
 Windscribe's official configuration generator requires a paid account, so it is not represented as a free third-party-config provider.
 
-The free-server catalog uses the official VPN Gate public directory. Its relays are operated by volunteers, not by RouteScout. Availability, speed, and trustworthiness vary; do not send passwords or sensitive traffic through an untrusted relay. The directory's ping and score are upstream measurements, not measurements from the user's device.
+The free-server catalog uses the official VPN Gate public directory. Its relays are operated by volunteers, not by RouteScout. Availability, speed, and trustworthiness vary; do not send passwords or sensitive traffic through an untrusted relay. The directory's ping and score are upstream measurements, not measurements from the user's device. RouteScout can independently probe TCP endpoints; UDP reachability is only established by a successful OpenVPN handshake.
 
 RouteScout currently exports a selected OpenVPN profile to an installed OpenVPN client. The user must complete the import and connection in that client and enter vpn / vpn if the relay requests credentials. This handoff is explicit; the app does not claim an OpenVPN tunnel is active when it cannot observe that tunnel.
 
