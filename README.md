@@ -50,3 +50,5 @@ The visual language follows the supplied reference image:
 4. Add server health checks and controlled reconnect/failover.
 5. Add per-app routing and a proper diagnostic report.
 6. Validate on physical Android devices and build a release APK.
+
+CI note: the workflow uses the runner's preinstalled Android SDK command-line tools.
