@@ -1,6 +1,9 @@
 package com.routescout.mobile.ui
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -16,11 +19,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -81,9 +87,16 @@ import com.routescout.mobile.ui.theme.RouteSurfaceRaised
 import com.routescout.mobile.ui.theme.RouteText
 import com.routescout.mobile.vpn.SecureConfigStore
 import com.routescout.mobile.vpn.WireGuardManager
+import com.routescout.mobile.vpn.FreeVpnServer
+import com.routescout.mobile.vpn.VpnGateRepository
+import com.routescout.mobile.vpn.VpnGateProfileExporter
+import com.routescout.mobile.vpn.ServerSelectionEngine
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.config.Config
 import java.io.ByteArrayInputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -101,8 +114,16 @@ fun RouteScoutApp() {
     val scope = rememberCoroutineScope()
     val configStore = remember(context) { SecureConfigStore(context) }
     val wireGuardManager = remember(context) { WireGuardManager(context) }
+    val vpnGateRepository = remember { VpnGateRepository() }
+    val profileExporter = remember(context) { VpnGateProfileExporter(context) }
 
     var selectedTab by remember { mutableStateOf(AppTab.OVERVIEW) }
+    var freeServers by remember { mutableStateOf<List<FreeVpnServer>>(emptyList()) }
+    var isLoadingFreeServers by remember { mutableStateOf(false) }
+    var freeServersError by remember { mutableStateOf<String?>(null) }
+    var freeServersUpdated by remember { mutableStateOf<String?>(null) }
+    var freeServerActionMessage by remember { mutableStateOf<String?>(null) }
+    var exportingServerKey by remember { mutableStateOf<String?>(null) }
     var snapshot by remember { mutableStateOf(DiagnosticSnapshot()) }
     var isChecking by remember { mutableStateOf(false) }
     var profileImported by remember { mutableStateOf(false) }
@@ -209,6 +230,63 @@ fun RouteScoutApp() {
         }
     }
 
+    val refreshFreeServers: () -> Unit = {
+        if (!isLoadingFreeServers) {
+            scope.launch {
+                isLoadingFreeServers = true
+                freeServersError = null
+                try {
+                    freeServers = vpnGateRepository.refresh()
+                    freeServersUpdated = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                } catch (error: Exception) {
+                    freeServersError = error.message?.take(160) ?: "Не удалось обновить каталог VPN Gate"
+                } finally {
+                    isLoadingFreeServers = false
+                }
+            }
+        }
+    }
+
+    val openFreeServerProfile: (FreeVpnServer) -> Unit = { server ->
+        if (exportingServerKey == null) {
+            scope.launch {
+                exportingServerKey = server.key
+                freeServerActionMessage = null
+                try {
+                    val profileUri = withContext(Dispatchers.IO) {
+                        profileExporter.export(server)
+                    }
+                    val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(profileUri, "application/x-openvpn-profile")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        clipData = ClipData.newUri(
+                            context.contentResolver,
+                            "RouteScout OpenVPN profile",
+                            profileUri
+                        )
+                    }
+                    context.startActivity(Intent.createChooser(openIntent, "Открыть профиль в OpenVPN"))
+                    freeServerActionMessage =
+                        "Профиль подготовлен. Если клиент запросит учётные данные, введи vpn / vpn."
+                } catch (_: ActivityNotFoundException) {
+                    freeServerActionMessage =
+                        "OpenVPN-клиент не найден. Установи OpenVPN for Android или OpenVPN Connect."
+                } catch (error: Exception) {
+                    freeServerActionMessage =
+                        error.message?.take(160) ?: "Не удалось подготовить OpenVPN-профиль."
+                } finally {
+                    exportingServerKey = null
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == AppTab.SERVERS && freeServers.isEmpty() && !isLoadingFreeServers) {
+            refreshFreeServers()
+        }
+    }
+
     val runDiagnostics: () -> Unit = {
         if (!isChecking) {
             scope.launch {
@@ -254,6 +332,14 @@ fun RouteScoutApp() {
                         onOpenServers = { selectedTab = AppTab.SERVERS }
                     )
                     AppTab.SERVERS -> ServersScreen(
+                        freeServers = freeServers,
+                        isLoadingFreeServers = isLoadingFreeServers,
+                        freeServersError = freeServersError,
+                        freeServersUpdated = freeServersUpdated,
+                        freeServerActionMessage = freeServerActionMessage,
+                        exportingServerKey = exportingServerKey,
+                        onRefreshFreeServers = refreshFreeServers,
+                        onOpenFreeServerProfile = openFreeServerProfile,
                         profileImported = profileImported,
                         profileEndpoint = profileEndpoint,
                         isVpnConnected = isVpnConnected,
@@ -666,6 +752,14 @@ private fun ServerPreviewPanel(onOpenServers: () -> Unit) {
 
 @Composable
 private fun ServersScreen(
+    freeServers: List<FreeVpnServer>,
+    isLoadingFreeServers: Boolean,
+    freeServersError: String?,
+    freeServersUpdated: String?,
+    freeServerActionMessage: String?,
+    exportingServerKey: String?,
+    onRefreshFreeServers: () -> Unit,
+    onOpenFreeServerProfile: (FreeVpnServer) -> Unit,
     profileImported: Boolean,
     profileEndpoint: String?,
     isVpnConnected: Boolean,
@@ -746,6 +840,97 @@ private fun ServersScreen(
             }
         }
         Panel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Бесплатные серверы", color = RouteText, fontSize = 20.sp, fontFamily = FontFamily.Serif)
+                    Text("VPN Gate · общественные OpenVPN-реле", color = RouteMuted, fontSize = 11.sp)
+                }
+                Button(
+                    onClick = onRefreshFreeServers,
+                    enabled = !isLoadingFreeServers,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RouteSurfaceRaised,
+                        contentColor = RouteCyan
+                    )
+                ) {
+                    if (isLoadingFreeServers) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 2.dp,
+                            color = RouteCyan
+                        )
+                    } else {
+                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Каталог загружается из официального API VPN Gate. Ping и рейтинг предоставлены самим каталогом, а не измерены этим телефоном.",
+                color = RouteMuted,
+                fontSize = 11.sp,
+                lineHeight = 16.sp
+            )
+            if (freeServersUpdated != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Обновлено: $freeServersUpdated · найдено: ${freeServers.size}",
+                    color = RouteCyan,
+                    fontSize = 10.sp
+                )
+            }
+            freeServersError?.let {
+                Spacer(Modifier.height(8.dp))
+                Text("Ошибка каталога: $it", color = RouteCoralSoft, fontSize = 11.sp)
+            }
+            freeServerActionMessage?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, color = RouteCyan, fontSize = 11.sp, lineHeight = 16.sp)
+            }
+            if (freeServers.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                val bestServer = ServerSelectionEngine.bestServer(freeServers)
+                if (bestServer != null) {
+                    Button(
+                        onClick = { onOpenFreeServerProfile(bestServer) },
+                        enabled = exportingServerKey == null,
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(13.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RouteCoral,
+                            contentColor = RouteBackground
+                        )
+                    ) {
+                        Text("AUTO · открыть лучший сервер", fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    items(freeServers, key = { it.key }) { server ->
+                        FreeVpnServerCard(
+                            server = server,
+                            isBusy = exportingServerKey != null,
+                            onOpenProfile = { onOpenFreeServerProfile(server) }
+                        )
+                    }
+                }
+            } else if (!isLoadingFreeServers && freeServersError == null) {
+                Spacer(Modifier.height(8.dp))
+                Text("Список серверов ещё не загружен. Нажми обновить.", color = RouteMuted, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Важно: это общественные серверы добровольцев. Оператор может видеть незашифрованный трафик и собирать метаданные. Не используй их для банков, почты и важных аккаунтов. Для подключения профиль пока передаётся в отдельный OpenVPN-клиент.",
+                color = RouteCoralSoft,
+                fontSize = 11.sp,
+                lineHeight = 16.sp
+            )
+        }
+        Panel {
             Text("Безопасность профиля", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(8.dp))
             Text(
@@ -756,6 +941,86 @@ private fun ServersScreen(
             )
         }
     }
+}
+
+@Composable
+private fun FreeVpnServerCard(
+    server: FreeVpnServer,
+    isBusy: Boolean,
+    onOpenProfile: () -> Unit
+) {
+    Surface(
+        color = RouteSurfaceRaised.copy(alpha = 0.62f),
+        shape = RoundedCornerShape(15.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, RouteBlue.copy(alpha = 0.45f))
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(13.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(countryFlag(server.countryCode), fontSize = 24.sp)
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(server.countryName, color = RouteText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(server.hostName, color = RouteMuted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text("VPN GATE", color = RoutePurple, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(9.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ServerMetric("PING", server.pingMs?.let { "$it ms" } ?: "—", Modifier.weight(1f))
+                ServerMetric("СКОРОСТЬ", server.speedBitsPerSecond?.let { formatServerSpeed(it) } ?: "—", Modifier.weight(1f))
+                ServerMetric("СЕССИИ", server.activeSessions.toString(), Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "IP ${server.ipAddress} · рейтинг ${server.score} · uptime ${formatServerUptime(server.uptimeSeconds)}",
+                color = RouteMuted,
+                fontSize = 10.sp
+            )
+            if (server.logType.isNotBlank()) {
+                Text("Политика логов в каталоге: ${server.logType}", color = RouteMuted, fontSize = 9.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = onOpenProfile,
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth().height(38.dp),
+                shape = RoundedCornerShape(11.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0x2238D7D0),
+                    contentColor = RouteCyan
+                )
+            ) {
+                Text(if (isBusy) "Подготовка профиля…" else "Открыть профиль в OpenVPN", fontSize = 11.sp)
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.Outlined.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServerMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        Text(label, color = RouteMuted, fontSize = 8.sp, letterSpacing = 0.7.sp)
+        Text(value, color = RouteText, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+private fun countryFlag(countryCode: String): String {
+    if (countryCode.length != 2 || countryCode.any { !it.isLetter() }) return "🌐"
+    return countryCode.uppercase().map { character ->
+        String(Character.toChars(0x1F1E6 + character.code - 'A'.code))
+    }.joinToString("")
+}
+
+private fun formatServerSpeed(bitsPerSecond: Long): String =
+    String.format(Locale.getDefault(), "%.1f Mbps", bitsPerSecond / 1_000_000.0)
+
+private fun formatServerUptime(seconds: Long): String {
+    if (seconds <= 0L) return "—"
+    val days = seconds / 86_400
+    val hours = (seconds % 86_400) / 3_600
+    return if (days > 0) "$days д. $hours ч." else "$hours ч."
 }
 
 @Composable
