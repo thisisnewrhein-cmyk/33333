@@ -23,13 +23,13 @@ Implemented in this branch:
 Not implemented yet:
 - An embedded OpenVPN engine. VPN Gate profiles are currently handed off to an installed OpenVPN client; RouteScout does not yet own that OpenVPN tunnel.
 - Automated Proton account authentication/configuration retrieval. Proton's official account portal is used for config generation; RouteScout does not scrape private endpoints or store Proton credentials.
-- Real in-app connection state and handshake verification for VPN Gate servers.
+- Real WireGuard peer handshake and received-traffic verification before the UI reports a successful WireGuard connection.
 - Automatic server failover after an OpenVPN tunnel drops.
 - Foreign IP verification and automatic IP switching.
 - Per-app and per-domain routing.
 - Full speed, packet-loss, jitter, and leak testing.
 
-The UI deliberately does not invent server locations, connection states, ping values, or foreign IP addresses.
+The UI deliberately does not invent server locations, connection states, ping values, or foreign IP addresses. WireGuard is only shown as connected after a recent peer handshake and post-connect traffic evidence are observed.
 
 ## Important infrastructure note
 
@@ -65,7 +65,7 @@ The visual language follows the supplied reference image:
 ## Next engineering milestones
 
 1. Integrate a maintained OpenVPN engine into RouteScout, subject to compatible licensing and Android lifecycle review.
-2. Observe actual OpenVPN handshake state and tunnel byte counters from inside RouteScout.
+2. Integrate and observe an in-app OpenVPN handshake state and tunnel byte counters, subject to compatible licensing.
 3. Verify public IPv4/IPv6, DNS routing, and leaks after a real handshake.
 4. Add measured server health checks and automatic failover with bounded retries.
 5. Add country filters, favourites, multi-profile storage, and server history.

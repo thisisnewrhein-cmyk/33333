@@ -142,9 +142,24 @@ fun RouteScoutApp() {
                     val configText = withContext(Dispatchers.IO) {
                         configStore.load() ?: error("No WireGuard profile")
                     }
+                    val previousTunnel = wireGuardManager.getSnapshot()
                     wireGuardManager.connect(configText)
-                    isVpnConnected = true
-                    vpnMessage = "WireGuard подключён"
+
+                    // Generate real traffic through the VPN before checking peer statistics.
+                    snapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
+                    val verifiedTunnel = wireGuardManager.waitForHandshake(previousTunnel)
+                    isVpnConnected =
+                        verifiedTunnel.isUp &&
+                        verifiedTunnel.hasRecentHandshake() &&
+                        verifiedTunnel.hasTrafficEvidenceSince(previousTunnel)
+
+                    vpnMessage = if (isVpnConnected) {
+                        "WireGuard handshake подтверждён"
+                    } else if (verifiedTunnel.isUp) {
+                        "Туннель запущен, но сервер не подтвердил handshake. Проверь Endpoint, ключи и доступность сервера."
+                    } else {
+                        "VPN-туннель не запущен. Проверь профиль и разрешение Android VPN."
+                    }
                 } catch (_: Exception) {
                     isVpnConnected = false
                     vpnMessage = "Не удалось подключиться. Проверьте профиль и доступность сервера."
@@ -221,9 +236,20 @@ fun RouteScoutApp() {
             val savedConfig = withContext(Dispatchers.IO) { configStore.load() }
             profileImported = savedConfig != null
             profileEndpoint = savedConfig?.let { extractEndpoint(it) }
-            isVpnConnected = wireGuardManager.isConnected()
+            val previousTunnel = wireGuardManager.getSnapshot()
+            if (previousTunnel.isUp) {
+                snapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
+                val verifiedTunnel = wireGuardManager.waitForHandshake(previousTunnel)
+                isVpnConnected =
+                    verifiedTunnel.isUp &&
+                    verifiedTunnel.hasRecentHandshake() &&
+                    verifiedTunnel.hasTrafficEvidenceSince(previousTunnel)
+            } else {
+                isVpnConnected = false
+            }
             vpnMessage = when {
-                isVpnConnected -> "WireGuard подключён"
+                isVpnConnected -> "WireGuard handshake подтверждён"
+                previousTunnel.isUp -> "Туннель запущен, но handshake сервера не подтверждён"
                 profileImported -> "Профиль готов к подключению"
                 else -> "Сервер не настроен"
             }
