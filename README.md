@@ -17,7 +17,7 @@ Implemented in this branch:
 - Server ranking based on VPN Gate's published score, ping, and throughput.
 - Temporary .ovpn profile export through Android FileProvider.
 - OpenVPN profile filtering that removes local script/plugin/management directives and rejects external certificate paths.
-- Unit tests for CSV parsing and server selection.
+- Unit tests for CSV parsing, server selection, and WireGuard handshake evidence.
 - Proton VPN Free setup path using the existing in-app WireGuard backend after the user downloads a configuration from the official account portal.
 
 Not implemented yet:
