@@ -21,14 +21,14 @@ Implemented in this branch:
 - OpenVPN profile filtering that removes local script/plugin/management directives and rejects external certificate paths.
 - Unit tests for CSV parsing, server selection, and WireGuard handshake evidence.
 - Proton VPN Free setup path using the existing in-app WireGuard backend after the user downloads a configuration from the official account portal.
+- WireGuard peer handshake and received-traffic verification before the UI reports a successful WireGuard connection.
+- Public IPv4/IPv6 lookup using independent ipify and ipapi.co sources, country/ASN metadata, and same-family IP-source comparison.
 
 Not implemented yet:
 - An embedded OpenVPN engine. VPN Gate profiles are currently handed off to an installed OpenVPN client; RouteScout does not yet own that OpenVPN tunnel.
 - Automated Proton account authentication/configuration retrieval. Proton's official account portal is used for config generation; RouteScout does not scrape private endpoints or store Proton credentials.
-- Real WireGuard peer handshake and received-traffic verification before the UI reports a successful WireGuard connection.
-- Public IPv4/IPv6 lookup using independent ipify and ipapi.co sources, country/ASN metadata, and same-family IP-source comparison.
 - Automatic server failover after an OpenVPN tunnel drops.
-- Foreign IP verification and automatic IP switching.
+- Automatic IP switching and comparison with the pre-VPN IP.
 - Per-app and per-domain routing.
 - Full speed, packet-loss, jitter, and leak testing.
 
@@ -40,8 +40,6 @@ The UI deliberately does not invent server locations, connection states, ping va
 
 - **VPN Gate:** public volunteer relay directory, dynamic server list, OpenVPN profile export. An installed OpenVPN client is currently required for the handoff.
 - **Proton VPN Free:** requires a free Proton account. The official portal can generate a WireGuard configuration on the Free plan; import the downloaded .conf into RouteScout to use its built-in WireGuard engine. The Free plan has one simultaneous device and free locations in ten countries; Proton states there are no data or time limits. The account portal is user-operated; RouteScout does not automate sign-in.
-
-Windscribe's official configuration generator requires a paid account, so it is not represented as a free third-party-config provider.
 
 The free-server catalog uses the official VPN Gate public directory. Its relays are operated by volunteers, not by RouteScout. Availability, speed, and trustworthiness vary; do not send passwords or sensitive traffic through an untrusted relay. The directory's ping and score are upstream measurements, not measurements from the user's device. Public-IP checks contact ipify.org and ipapi.co; those services see the public IP making the request. RouteScout does not upload diagnostic reports. RouteScout can independently probe TCP endpoints; UDP reachability is only established by a successful OpenVPN handshake.
 
@@ -72,7 +70,7 @@ The visual language follows the supplied reference image:
 3. Verify public IPv4/IPv6, DNS routing, and leaks after a real handshake.
 4. Add measured server health checks and automatic failover with bounded retries.
 5. Add IPv6/DNS leak verification, jitter, packet-loss sampling, and opt-in throughput tests.
-5. Add country filters, favourites, multi-profile storage, and server history.
-6. Validate on physical Android devices and build a release APK.
+6. Add country filters, favourites, multi-profile storage, and server history.
+7. Validate on physical Android devices and build a release APK.
 
 CI note: the workflow uses the runner's preinstalled Android SDK command-line tools.
