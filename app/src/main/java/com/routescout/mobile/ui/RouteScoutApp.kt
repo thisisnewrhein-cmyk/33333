@@ -1,7 +1,11 @@
 package com.routescout.mobile.ui
 
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,6 +46,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +79,13 @@ import com.routescout.mobile.ui.theme.RouteMuted
 import com.routescout.mobile.ui.theme.RoutePurple
 import com.routescout.mobile.ui.theme.RouteSurfaceRaised
 import com.routescout.mobile.ui.theme.RouteText
+import com.routescout.mobile.vpn.SecureConfigStore
+import com.routescout.mobile.vpn.WireGuardManager
+import com.wireguard.android.backend.GoBackend
+import com.wireguard.config.Config
+import java.io.ByteArrayInputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 private enum class AppTab(val title: String) {
@@ -87,9 +99,115 @@ private enum class AppTab(val title: String) {
 fun RouteScoutApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val configStore = remember(context) { SecureConfigStore(context) }
+    val wireGuardManager = remember(context) { WireGuardManager(context) }
+
     var selectedTab by remember { mutableStateOf(AppTab.OVERVIEW) }
     var snapshot by remember { mutableStateOf(DiagnosticSnapshot()) }
     var isChecking by remember { mutableStateOf(false) }
+    var profileImported by remember { mutableStateOf(false) }
+    var profileEndpoint by remember { mutableStateOf<String?>(null) }
+    var isVpnConnected by remember { mutableStateOf(false) }
+    var isVpnBusy by remember { mutableStateOf(false) }
+    var vpnMessage by remember { mutableStateOf("Сервер не настроен") }
+
+    val connectTunnel: () -> Unit = {
+        if (!isVpnBusy) {
+            scope.launch {
+                isVpnBusy = true
+                try {
+                    val configText = withContext(Dispatchers.IO) {
+                        configStore.load() ?: error("No WireGuard profile")
+                    }
+                    wireGuardManager.connect(configText)
+                    isVpnConnected = true
+                    vpnMessage = "WireGuard подключён"
+                } catch (_: Exception) {
+                    isVpnConnected = false
+                    vpnMessage = "Не удалось подключиться. Проверьте профиль и доступность сервера."
+                } finally {
+                    isVpnBusy = false
+                }
+            }
+        }
+    }
+
+    val vpnPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            connectTunnel()
+        } else {
+            vpnMessage = "Разрешение VPN не предоставлено"
+        }
+    }
+
+    val requestConnect: () -> Unit = {
+        val permissionIntent = GoBackend.VpnService.prepare(context)
+        if (permissionIntent != null) {
+            vpnPermissionLauncher.launch(permissionIntent)
+        } else {
+            connectTunnel()
+        }
+    }
+
+    val disconnectTunnel: () -> Unit = {
+        if (!isVpnBusy) {
+            scope.launch {
+                isVpnBusy = true
+                try {
+                    wireGuardManager.disconnect()
+                    isVpnConnected = false
+                    vpnMessage = "Соединение отключено"
+                } catch (_: Exception) {
+                    vpnMessage = "Не удалось корректно отключить туннель"
+                } finally {
+                    isVpnBusy = false
+                }
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val configText = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            input.readBytes().toString(Charsets.UTF_8)
+                        } ?: error("Cannot read selected file")
+                    }
+                    withContext(Dispatchers.IO) {
+                        Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
+                        configStore.save(configText)
+                    }
+                    profileImported = true
+                    profileEndpoint = extractEndpoint(configText)
+                    vpnMessage = "Профиль WireGuard сохранён в защищённом хранилище"
+                } catch (_: Exception) {
+                    vpnMessage = "Не удалось импортировать файл. Нужен корректный WireGuard .conf"
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        try {
+            val savedConfig = withContext(Dispatchers.IO) { configStore.load() }
+            profileImported = savedConfig != null
+            profileEndpoint = savedConfig?.let { extractEndpoint(it) }
+            isVpnConnected = wireGuardManager.isConnected()
+            vpnMessage = when {
+                isVpnConnected -> "WireGuard подключён"
+                profileImported -> "Профиль готов к подключению"
+                else -> "Сервер не настроен"
+            }
+        } catch (_: Exception) {
+            vpnMessage = "Не удалось прочитать сохранённый профиль"
+        }
+    }
 
     val runDiagnostics: () -> Unit = {
         if (!isChecking) {
@@ -126,10 +244,33 @@ fun RouteScoutApp() {
                     AppTab.OVERVIEW -> OverviewScreen(
                         snapshot = snapshot,
                         isChecking = isChecking,
+                        isVpnConnected = isVpnConnected,
+                        profileImported = profileImported,
+                        isVpnBusy = isVpnBusy,
+                        vpnMessage = vpnMessage,
                         onRunDiagnostics = runDiagnostics,
+                        onConnect = requestConnect,
+                        onDisconnect = disconnectTunnel,
                         onOpenServers = { selectedTab = AppTab.SERVERS }
                     )
-                    AppTab.SERVERS -> ServersScreen()
+                    AppTab.SERVERS -> ServersScreen(
+                        profileImported = profileImported,
+                        profileEndpoint = profileEndpoint,
+                        isVpnConnected = isVpnConnected,
+                        isVpnBusy = isVpnBusy,
+                        vpnMessage = vpnMessage,
+                        onImport = { importLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
+                        onConnect = requestConnect,
+                        onDisconnect = disconnectTunnel,
+                        onDeleteProfile = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { configStore.delete() }
+                                profileImported = false
+                                profileEndpoint = null
+                                vpnMessage = "Профиль удалён"
+                            }
+                        }
+                    )
                     AppTab.DIAGNOSTICS -> DiagnosticsScreen(
                         snapshot = snapshot,
                         isChecking = isChecking,
@@ -148,6 +289,13 @@ fun RouteScoutApp() {
         }
     }
 }
+
+private fun extractEndpoint(configText: String): String? =
+    configText.lineSequence()
+        .firstOrNull { it.trim().startsWith("Endpoint", ignoreCase = true) }
+        ?.substringAfter("=")
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
 
 @Composable
 private fun AmbientBackdrop() {
@@ -227,7 +375,13 @@ private fun AppHeader() {
 private fun OverviewScreen(
     snapshot: DiagnosticSnapshot,
     isChecking: Boolean,
+    isVpnConnected: Boolean,
+    profileImported: Boolean,
+    isVpnBusy: Boolean,
+    vpnMessage: String,
     onRunDiagnostics: () -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
     onOpenServers: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -240,7 +394,15 @@ private fun OverviewScreen(
         )
         Text("Контроль подключения и состояния сети", color = RouteMuted, fontSize = 13.sp)
 
-        ConnectionPanel(onOpenServers = onOpenServers)
+        ConnectionPanel(
+            isVpnConnected = isVpnConnected,
+            profileImported = profileImported,
+            isVpnBusy = isVpnBusy,
+            vpnMessage = vpnMessage,
+            onConnect = onConnect,
+            onDisconnect = onDisconnect,
+            onOpenServers = onOpenServers
+        )
 
         Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             MetricPanel(
@@ -296,7 +458,15 @@ private fun OverviewScreen(
 }
 
 @Composable
-private fun ConnectionPanel(onOpenServers: () -> Unit) {
+private fun ConnectionPanel(
+    isVpnConnected: Boolean,
+    profileImported: Boolean,
+    isVpnBusy: Boolean,
+    vpnMessage: String,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onOpenServers: () -> Unit
+) {
     Panel(
         modifier = Modifier.shadow(16.dp, RoundedCornerShape(24.dp), ambientColor = RouteCoral.copy(alpha = 0.12f))
     ) {
@@ -306,31 +476,70 @@ private fun ConnectionPanel(onOpenServers: () -> Unit) {
                     .size(58.dp)
                     .clip(CircleShape)
                     .background(Brush.radialGradient(listOf(RouteCoral.copy(alpha = 0.3f), Color(0x22151B2A))))
-                    .border(1.dp, RouteCoral.copy(alpha = 0.5f), CircleShape),
+                    .border(1.dp, if (isVpnConnected) RouteCyan.copy(alpha = 0.6f) else RouteCoral.copy(alpha = 0.5f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Outlined.Shield, contentDescription = null, tint = RouteCoralSoft, modifier = Modifier.size(28.dp))
+                Icon(
+                    Icons.Outlined.Shield,
+                    contentDescription = null,
+                    tint = if (isVpnConnected) RouteCyan else RouteCoralSoft,
+                    modifier = Modifier.size(28.dp)
+                )
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text("ЗАЩИЩЁННОЕ СОЕДИНЕНИЕ", color = RouteMuted, fontSize = 9.sp, letterSpacing = 1.1.sp)
                 Spacer(Modifier.height(4.dp))
-                Text("Не подключено", color = RouteText, fontSize = 22.sp, fontFamily = FontFamily.Serif)
-                Text("Сервер ещё не настроен", color = RouteMuted, fontSize = 11.sp)
+                Text(
+                    if (isVpnConnected) "Подключено" else "Не подключено",
+                    color = RouteText,
+                    fontSize = 22.sp,
+                    fontFamily = FontFamily.Serif
+                )
+                Text(
+                    if (isVpnConnected) "WireGuard туннель активен" else if (profileImported) "Профиль готов к запуску" else "Сервер ещё не настроен",
+                    color = RouteMuted,
+                    fontSize = 11.sp
+                )
             }
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(9.dp))
+        Text(vpnMessage, color = if (isVpnConnected) RouteCyan else RouteMuted, fontSize = 10.sp)
+        Spacer(Modifier.height(14.dp))
         Button(
-            onClick = onOpenServers,
+            onClick = when {
+                isVpnBusy -> ({})
+                isVpnConnected -> onDisconnect
+                profileImported -> onConnect
+                else -> onOpenServers
+            },
+            enabled = !isVpnBusy,
             modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = RoundedCornerShape(15.dp),
             colors = ButtonDefaults.buttonColors(containerColor = RouteCoral, contentColor = RouteBackground)
         ) {
-            Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Настроить сервер", fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-            Icon(Icons.Outlined.ArrowForward, contentDescription = null, modifier = Modifier.size(17.dp))
+            if (isVpnBusy) {
+                CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp, color = RouteBackground)
+                Spacer(Modifier.width(8.dp))
+                Text("Подождите…", fontWeight = FontWeight.Bold)
+            } else {
+                Icon(
+                    if (isVpnConnected) Icons.Outlined.Shield else Icons.Outlined.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    when {
+                        isVpnConnected -> "Отключить"
+                        profileImported -> "Подключить"
+                        else -> "Добавить VPN-профиль"
+                    },
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.weight(1f))
+                Icon(Icons.Outlined.ArrowForward, contentDescription = null, modifier = Modifier.size(17.dp))
+            }
         }
     }
 }
@@ -456,7 +665,17 @@ private fun ServerPreviewPanel(onOpenServers: () -> Unit) {
 }
 
 @Composable
-private fun ServersScreen() {
+private fun ServersScreen(
+    profileImported: Boolean,
+    profileEndpoint: String?,
+    isVpnConnected: Boolean,
+    isVpnBusy: Boolean,
+    vpnMessage: String,
+    onImport: () -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onDeleteProfile: () -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Серверы", color = RouteText, fontSize = 31.sp, fontFamily = FontFamily.Serif)
         Text("Управление точками подключения", color = RouteMuted, fontSize = 13.sp)
@@ -470,28 +689,71 @@ private fun ServersScreen() {
                 Icon(Icons.Outlined.Public, contentDescription = null, tint = RoutePurple, modifier = Modifier.size(27.dp))
             }
             Spacer(Modifier.height(15.dp))
-            Text("Нет добавленных серверов", color = RouteText, fontSize = 21.sp, fontFamily = FontFamily.Serif)
+            Text(
+                if (profileImported) "WireGuard-профиль добавлен" else "Нет добавленных серверов",
+                color = RouteText,
+                fontSize = 21.sp,
+                fontFamily = FontFamily.Serif
+            )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Здесь будут отображаться страны, серверы, протоколы и задержка до каждой точки подключения.",
+                if (profileImported) "Профиль сохранён локально в зашифрованном виде." else "Импортируй конфигурацию WireGuard (.conf), полученную от своего VPS или VPN-провайдера.",
                 color = RouteMuted,
                 fontSize = 12.sp,
                 lineHeight = 18.sp
             )
-            Spacer(Modifier.height(13.dp))
-            Text(
-                "Сетевое ядро ещё не подключено. Мы не показываем фиктивные серверы и не имитируем смену IP.",
-                color = RouteCoralSoft,
-                fontSize = 11.sp,
-                lineHeight = 17.sp
-            )
+            if (profileEndpoint != null) {
+                Spacer(Modifier.height(10.dp))
+                Text("Endpoint: " + profileEndpoint, color = RouteCyan, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(vpnMessage, color = if (isVpnConnected) RouteCyan else RouteMuted, fontSize = 11.sp)
+            Spacer(Modifier.height(14.dp))
+            Button(
+                onClick = onImport,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = RouteSurfaceRaised, contentColor = RouteCyan)
+            ) {
+                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (profileImported) "Заменить профиль" else "Импортировать WireGuard .conf")
+            }
+            if (profileImported) {
+                Spacer(Modifier.height(9.dp))
+                Button(
+                    onClick = if (isVpnConnected) onDisconnect else onConnect,
+                    enabled = !isVpnBusy,
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = RouteCoral, contentColor = RouteBackground)
+                ) {
+                    if (isVpnBusy) {
+                        CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp, color = RouteBackground)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Подождите…")
+                    } else {
+                        Text(if (isVpnConnected) "Отключить VPN" else "Подключиться")
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    "Удалить сохранённый профиль",
+                    color = RouteCoralSoft,
+                    fontSize = 11.sp,
+                    modifier = Modifier.align(Alignment.CenterHorizontally).clickable(onClick = onDeleteProfile).padding(8.dp)
+                )
+            }
         }
         Panel {
-            Text("Что понадобится", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
+            Text("Безопасность профиля", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(8.dp))
-            HealthRow("VPN-профиль", "WireGuard / другой", false)
-            HealthRow("Удалённый сервер", "VPS или провайдер", false)
-            HealthRow("Учётные данные", "Ключи доступа", false)
+            Text(
+                "Конфигурация шифруется ключом Android Keystore и хранится только в приватной памяти приложения. Не загружай её в GitHub.",
+                color = RouteMuted,
+                fontSize = 12.sp,
+                lineHeight = 18.sp
+            )
         }
     }
 }
