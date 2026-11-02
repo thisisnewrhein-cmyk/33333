@@ -618,6 +618,8 @@ private fun OverviewScreen(
             onOpenServers = onOpenServers
         )
 
+        PublicIpPanel(snapshot)
+
         Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             MetricPanel(
                 modifier = Modifier.weight(1f),
@@ -1258,6 +1260,52 @@ private fun formatServerUptime(seconds: Long): String {
 }
 
 @Composable
+private fun PublicIpPanel(snapshot: DiagnosticSnapshot) {
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Внешний IP", color = RouteText, fontSize = 19.sp, fontFamily = FontFamily.Serif)
+                Text(
+                    snapshot.countryName?.let { country ->
+                        if (snapshot.countryCode != null) "$country · ${snapshot.countryCode}" else country
+                    } ?: "Страна пока не определена",
+                    color = RouteMuted,
+                    fontSize = 11.sp
+                )
+            }
+            Icon(Icons.Outlined.Public, contentDescription = null, tint = RouteCyan, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            snapshot.publicIp ?: if (snapshot.ipSourcesAgree == false) "Источники IP расходятся" else "Нет данных",
+            color = if (snapshot.publicIp != null) RouteCyan else RouteMuted,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        if (snapshot.publicIpv6 != null) {
+            Spacer(Modifier.height(5.dp))
+            Text("IPv6: ${snapshot.publicIpv6}", color = RouteMuted, fontSize = 10.sp)
+        }
+        if (snapshot.asn != null) {
+            Spacer(Modifier.height(3.dp))
+            Text("ASN: ${snapshot.asn}", color = RouteMuted, fontSize = 10.sp)
+        }
+        if (snapshot.ipSourcesAgree == false) {
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "Два источника вернули разные адреса одного семейства. Публичный IP не подтверждён.",
+                color = RouteCoralSoft,
+                fontSize = 10.sp,
+                lineHeight = 14.sp
+            )
+        } else if (snapshot.ipSourcesAgree == true) {
+            Spacer(Modifier.height(7.dp))
+            Text("IP подтверждён двумя независимыми источниками", color = RouteCyan, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
 private fun DiagnosticsScreen(
     snapshot: DiagnosticSnapshot,
     isChecking: Boolean,
@@ -1273,6 +1321,18 @@ private fun DiagnosticsScreen(
             HealthRow("Интернет", if (snapshot.internetAvailable == true) "Доступен" else if (snapshot.internetAvailable == false) "Недоступен" else "Нет данных", snapshot.internetAvailable == true)
             HealthRow("DNS example.com", snapshot.dnsLatencyMs?.toString()?.plus(" ms") ?: "Нет данных", snapshot.dnsLatencyMs != null)
             HealthRow("HTTPS example.com", snapshot.httpsLatencyMs?.toString()?.plus(" ms") ?: "Нет данных", snapshot.httpsLatencyMs != null)
+            HealthRow("Публичный IP", snapshot.publicIp ?: "Нет данных", snapshot.publicIp != null)
+            HealthRow("IPv4", snapshot.publicIpv4 ?: "Нет данных", snapshot.publicIpv4 != null)
+            HealthRow("IPv6", snapshot.publicIpv6 ?: "Нет данных", snapshot.publicIpv6 != null)
+            HealthRow("Страна", snapshot.countryName ?: "Нет данных", snapshot.countryName != null)
+            HealthRow("ASN", snapshot.asn ?: "Нет данных", snapshot.asn != null)
+            snapshot.ipSourcesAgree?.let { agrees ->
+                HealthRow(
+                    "Сверка IP-источников",
+                    if (agrees) "Совпадают" else "Расходятся",
+                    agrees
+                )
+            }
             snapshot.checkedAt?.let {
                 Spacer(Modifier.height(8.dp))
                 Text("Время проверки: " + it, color = RouteMuted, fontSize = 11.sp)
@@ -1300,7 +1360,7 @@ private fun SettingsScreen() {
             Text("Конфиденциальность", color = RouteText, fontSize = 19.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Базовая диагностика выполняется локально. Приложение не отправляет диагностические отчёты автоматически.",
+                "Базовые проверки выполняются на устройстве. Для определения публичного IP RouteScout обращается к ipify.org и ipapi.co; эти сервисы видят IP-адрес запроса. Диагностические отчёты автоматически не отправляются.",
                 color = RouteMuted,
                 fontSize = 12.sp,
                 lineHeight = 18.sp
