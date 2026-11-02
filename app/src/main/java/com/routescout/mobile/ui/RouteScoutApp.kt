@@ -92,6 +92,7 @@ import com.routescout.mobile.vpn.FreeVpnServer
 import com.routescout.mobile.vpn.VpnGateRepository
 import com.routescout.mobile.vpn.VpnGateProfileExporter
 import com.routescout.mobile.vpn.ServerSelectionEngine
+import com.routescout.mobile.vpn.ProtonFreeProvider
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.config.Config
 import java.io.ByteArrayInputStream
@@ -771,6 +772,7 @@ private fun ServersScreen(
     onDisconnect: () -> Unit,
     onDeleteProfile: () -> Unit
 ) {
+    val context = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Серверы", color = RouteText, fontSize = 31.sp, fontFamily = FontFamily.Serif)
         Text("Управление точками подключения", color = RouteMuted, fontSize = 13.sp)
@@ -851,6 +853,12 @@ private fun ServersScreen(
             )
             Spacer(Modifier.height(7.dp))
             Text(
+                "Доступных стран: " + ProtonFreeProvider.freeCountries.size,
+                color = RouteCyan,
+                fontSize = 10.sp
+            )
+            Spacer(Modifier.height(7.dp))
+            Text(
                 "Бесплатные страны: Нидерланды, Япония, Румыния, Польша, Норвегия, Швейцария, Сингапур, Мексика, Канада и США.",
                 color = RouteMuted,
                 fontSize = 11.sp,
@@ -860,7 +868,7 @@ private fun ServersScreen(
             Button(
                 onClick = {
                     context.startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://account.protonvpn.com/downloads"))
+                        Intent(Intent.ACTION_VIEW, Uri.parse(ProtonFreeProvider.CONFIG_PORTAL_URL))
                     )
                 },
                 modifier = Modifier.fillMaxWidth().height(42.dp),
