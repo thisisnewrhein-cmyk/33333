@@ -131,6 +131,7 @@ fun RouteScoutApp() {
     var profileImported by remember { mutableStateOf(false) }
     var profileEndpoint by remember { mutableStateOf<String?>(null) }
     var isVpnConnected by remember { mutableStateOf(false) }
+    var isVpnTunnelUp by remember { mutableStateOf(false) }
     var isVpnBusy by remember { mutableStateOf(false) }
     var vpnMessage by remember { mutableStateOf("Сервер не настроен") }
 
@@ -148,6 +149,7 @@ fun RouteScoutApp() {
                     // Generate real traffic through the VPN before checking peer statistics.
                     snapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
                     val verifiedTunnel = wireGuardManager.waitForHandshake(previousTunnel)
+                    isVpnTunnelUp = verifiedTunnel.isUp
                     isVpnConnected =
                         verifiedTunnel.isUp &&
                         verifiedTunnel.hasRecentHandshake() &&
@@ -162,6 +164,11 @@ fun RouteScoutApp() {
                     }
                 } catch (_: Exception) {
                     isVpnConnected = false
+                    isVpnTunnelUp = try {
+                        wireGuardManager.getSnapshot().isUp
+                    } catch (_: Exception) {
+                        false
+                    }
                     vpnMessage = "Не удалось подключиться. Проверьте профиль и доступность сервера."
                 } finally {
                     isVpnBusy = false
@@ -196,6 +203,7 @@ fun RouteScoutApp() {
                 try {
                     wireGuardManager.disconnect()
                     isVpnConnected = false
+                    isVpnTunnelUp = false
                     vpnMessage = "Соединение отключено"
                 } catch (_: Exception) {
                     vpnMessage = "Не удалось корректно отключить туннель"
@@ -237,15 +245,18 @@ fun RouteScoutApp() {
             profileImported = savedConfig != null
             profileEndpoint = savedConfig?.let { extractEndpoint(it) }
             val previousTunnel = wireGuardManager.getSnapshot()
+            isVpnTunnelUp = previousTunnel.isUp
             if (previousTunnel.isUp) {
                 snapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
                 val verifiedTunnel = wireGuardManager.waitForHandshake(previousTunnel)
+                isVpnTunnelUp = verifiedTunnel.isUp
                 isVpnConnected =
                     verifiedTunnel.isUp &&
                     verifiedTunnel.hasRecentHandshake() &&
                     verifiedTunnel.hasTrafficEvidenceSince(previousTunnel)
             } else {
                 isVpnConnected = false
+                isVpnTunnelUp = false
             }
             vpnMessage = when {
                 isVpnConnected -> "WireGuard handshake подтверждён"
@@ -351,6 +362,7 @@ fun RouteScoutApp() {
                         snapshot = snapshot,
                         isChecking = isChecking,
                         isVpnConnected = isVpnConnected,
+                        isVpnTunnelUp = isVpnTunnelUp,
                         profileImported = profileImported,
                         isVpnBusy = isVpnBusy,
                         vpnMessage = vpnMessage,
@@ -371,6 +383,7 @@ fun RouteScoutApp() {
                         profileImported = profileImported,
                         profileEndpoint = profileEndpoint,
                         isVpnConnected = isVpnConnected,
+                        isVpnTunnelUp = isVpnTunnelUp,
                         isVpnBusy = isVpnBusy,
                         vpnMessage = vpnMessage,
                         onImport = { importLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
@@ -490,6 +503,7 @@ private fun OverviewScreen(
     snapshot: DiagnosticSnapshot,
     isChecking: Boolean,
     isVpnConnected: Boolean,
+    isVpnTunnelUp: Boolean,
     profileImported: Boolean,
     isVpnBusy: Boolean,
     vpnMessage: String,
@@ -510,6 +524,7 @@ private fun OverviewScreen(
 
         ConnectionPanel(
             isVpnConnected = isVpnConnected,
+            isVpnTunnelUp = isVpnTunnelUp,
             profileImported = profileImported,
             isVpnBusy = isVpnBusy,
             vpnMessage = vpnMessage,
@@ -574,6 +589,7 @@ private fun OverviewScreen(
 @Composable
 private fun ConnectionPanel(
     isVpnConnected: Boolean,
+    isVpnTunnelUp: Boolean,
     profileImported: Boolean,
     isVpnBusy: Boolean,
     vpnMessage: String,
@@ -590,13 +606,13 @@ private fun ConnectionPanel(
                     .size(58.dp)
                     .clip(CircleShape)
                     .background(Brush.radialGradient(listOf(RouteCoral.copy(alpha = 0.3f), Color(0x22151B2A))))
-                    .border(1.dp, if (isVpnConnected) RouteCyan.copy(alpha = 0.6f) else RouteCoral.copy(alpha = 0.5f), CircleShape),
+                    .border(1.dp, if (isVpnConnected) RouteCyan.copy(alpha = 0.6f) else if (isVpnTunnelUp) RouteBlue.copy(alpha = 0.6f) else RouteCoral.copy(alpha = 0.5f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Outlined.Shield,
                     contentDescription = null,
-                    tint = if (isVpnConnected) RouteCyan else RouteCoralSoft,
+                    tint = if (isVpnConnected) RouteCyan else if (isVpnTunnelUp) RouteBlue else RouteCoralSoft,
                     modifier = Modifier.size(28.dp)
                 )
             }
@@ -605,25 +621,34 @@ private fun ConnectionPanel(
                 Text("ЗАЩИЩЁННОЕ СОЕДИНЕНИЕ", color = RouteMuted, fontSize = 9.sp, letterSpacing = 1.1.sp)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (isVpnConnected) "Подключено" else "Не подключено",
+                    when {
+                        isVpnConnected -> "Подключено"
+                        isVpnTunnelUp -> "Туннель запущен"
+                        else -> "Не подключено"
+                    },
                     color = RouteText,
                     fontSize = 22.sp,
                     fontFamily = FontFamily.Serif
                 )
                 Text(
-                    if (isVpnConnected) "WireGuard туннель активен" else if (profileImported) "Профиль готов к запуску" else "Сервер ещё не настроен",
+                    when {
+                        isVpnConnected -> "WireGuard handshake подтверждён"
+                        isVpnTunnelUp -> "Сервер ещё не подтвердил handshake"
+                        profileImported -> "Профиль готов к запуску"
+                        else -> "Сервер ещё не настроен"
+                    },
                     color = RouteMuted,
                     fontSize = 11.sp
                 )
             }
         }
         Spacer(Modifier.height(9.dp))
-        Text(vpnMessage, color = if (isVpnConnected) RouteCyan else RouteMuted, fontSize = 10.sp)
+        Text(vpnMessage, color = if (isVpnConnected) RouteCyan else if (isVpnTunnelUp) RouteCoralSoft else RouteMuted, fontSize = 10.sp)
         Spacer(Modifier.height(14.dp))
         Button(
             onClick = when {
                 isVpnBusy -> ({})
-                isVpnConnected -> onDisconnect
+                isVpnTunnelUp -> onDisconnect
                 profileImported -> onConnect
                 else -> onOpenServers
             },
@@ -638,14 +663,14 @@ private fun ConnectionPanel(
                 Text("Подождите…", fontWeight = FontWeight.Bold)
             } else {
                 Icon(
-                    if (isVpnConnected) Icons.Outlined.Shield else Icons.Outlined.Add,
+                    if (isVpnTunnelUp) Icons.Outlined.Shield else Icons.Outlined.Add,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     when {
-                        isVpnConnected -> "Отключить"
+                        isVpnTunnelUp -> "Отключить"
                         profileImported -> "Подключить"
                         else -> "Добавить VPN-профиль"
                     },
@@ -791,6 +816,7 @@ private fun ServersScreen(
     profileImported: Boolean,
     profileEndpoint: String?,
     isVpnConnected: Boolean,
+    isVpnTunnelUp: Boolean,
     isVpnBusy: Boolean,
     vpnMessage: String,
     onImport: () -> Unit,
@@ -830,7 +856,7 @@ private fun ServersScreen(
                 Text("Endpoint: " + profileEndpoint, color = RouteCyan, fontSize = 12.sp)
             }
             Spacer(Modifier.height(8.dp))
-            Text(vpnMessage, color = if (isVpnConnected) RouteCyan else RouteMuted, fontSize = 11.sp)
+            Text(vpnMessage, color = if (isVpnConnected) RouteCyan else if (isVpnTunnelUp) RouteCoralSoft else RouteMuted, fontSize = 11.sp)
             Spacer(Modifier.height(14.dp))
             Button(
                 onClick = onImport,
@@ -845,7 +871,7 @@ private fun ServersScreen(
             if (profileImported) {
                 Spacer(Modifier.height(9.dp))
                 Button(
-                    onClick = if (isVpnConnected) onDisconnect else onConnect,
+                    onClick = if (isVpnTunnelUp) onDisconnect else onConnect,
                     enabled = !isVpnBusy,
                     modifier = Modifier.fillMaxWidth().height(46.dp),
                     shape = RoundedCornerShape(14.dp),
@@ -856,7 +882,7 @@ private fun ServersScreen(
                         Spacer(Modifier.width(8.dp))
                         Text("Подождите…")
                     } else {
-                        Text(if (isVpnConnected) "Отключить VPN" else "Подключиться")
+                        Text(if (isVpnTunnelUp) "Отключить VPN" else "Подключиться")
                     }
                 }
                 Spacer(Modifier.height(5.dp))
