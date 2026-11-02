@@ -31,7 +31,9 @@ class ServerHealthChecker {
             .firstOrNull { it.size >= 3 && it[0].equals("remote", ignoreCase = true) }
             ?: return@withContext ServerHealthResult.InvalidProfile
 
-        val host = remote[1]
+        // Probe the numeric address supplied by the directory to avoid a DNS lookup
+        // during preflight and to remain usable when the relay hostname is filtered.
+        val host = server.ipAddress
         val port = remote[2].toIntOrNull()?.takeIf { it in 1..65535 }
             ?: return@withContext ServerHealthResult.InvalidProfile
 

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -310,6 +311,11 @@ fun RouteScoutApp() {
                             profileUri
                         )
                     }
+                    val openVpnHandler = context.packageManager.resolveActivity(
+                        openIntent,
+                        PackageManager.MATCH_DEFAULT_ONLY
+                    )
+                    if (openVpnHandler == null) throw ActivityNotFoundException()
                     context.startActivity(Intent.createChooser(openIntent, "Открыть профиль в OpenVPN"))
                     freeServerActionMessage =
                         "Профиль подготовлен. Если клиент запросит учётные данные, введи vpn / vpn."
