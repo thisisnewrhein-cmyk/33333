@@ -314,7 +314,7 @@ fun RouteScoutApp() {
                         } ?: error("Cannot read selected file")
                     }
                     if (configText.trimStart().startsWith("{")) {
-                        val profile = SingBoxConfigValidator.validateAndNormalize(configText)
+                        val profile = SingBoxConfigValidator.validateAndNormalize(configText, context.packageName)
                         withContext(Dispatchers.IO) {
                             singBoxConfigStore.save(profile.normalizedJson)
                         }
@@ -378,7 +378,7 @@ fun RouteScoutApp() {
             profileEndpoint = when (activeProfileEngine) {
                 VpnEngineId.WIREGUARD -> savedConfig?.let { extractEndpoint(it) }
                 VpnEngineId.SING_BOX -> savedSingBoxConfig?.let {
-                    SingBoxConfigValidator.validateAndNormalize(it).primaryEndpoint
+                    SingBoxConfigValidator.validateAndNormalize(it, context.packageName).primaryEndpoint
                 }
                 VpnEngineId.OPENVPN -> null
             }
