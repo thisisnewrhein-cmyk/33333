@@ -97,11 +97,20 @@ object SingBoxConfigValidator {
             "Профиль исключает весь IPv4 или IPv6 трафик из туннеля"
         }
 
+        val includePackages = tun.optJSONArray("include_package")
+        val excludePackages = tun.optJSONArray("exclude_package")
+        require(
+            includePackages == null || includePackages.length() == 0 ||
+                excludePackages == null || excludePackages.length() == 0
+        ) {
+            "Android не позволяет одновременно включить allowlist и blocklist приложений в одном VPN-профиле"
+        }
+
         tun.put("auto_route", true)
         require(!tun.optString("dns_mode").equals("disabled", ignoreCase = true)) {
             "DNS hijack отключён; профиль не пройдёт базовую защиту DNS"
         }
-        if (!tun.has("dns_mode")) tun.put("dns_mode", "hijack")
+        tun.put("dns_mode", "hijack")
 
         val endpoint = extractEndpoint(finalOutbound)
             ?: remoteOutbounds.firstOrNull()?.let(::extractEndpoint)
