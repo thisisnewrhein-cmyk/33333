@@ -76,6 +76,19 @@ object SingBoxConfigValidator {
         require(finalType in protocolByOutboundType.keys || finalType in setOf("selector", "urltest")) {
             "Финальный outbound $finalType не поддерживается RouteScout"
         }
+        if (finalType in setOf("selector", "urltest")) {
+            val candidates = finalOutbound.optJSONArray("outbounds")
+                ?: throw IllegalArgumentException("Финальный selector/urltest не содержит список outbound")
+            val candidateTypes = (0 until candidates.length()).mapNotNull { index ->
+                byTag[candidates.optString(index)]?.optString("type")?.lowercase()
+            }
+            require(candidateTypes.any { it in protocolByOutboundType.keys }) {
+                "Финальный selector/urltest не содержит поддерживаемого VPN-протокола"
+            }
+            require(candidateTypes.none { it in setOf("direct", "block", "dns") }) {
+                "Финальный selector/urltest содержит прямой или блокирующий маршрут"
+            }
+        }
 
         // Prevent the tunnel's own upstream sockets from being routed back into TUN.
         route.put("auto_detect_interface", true)
@@ -91,10 +104,15 @@ object SingBoxConfigValidator {
         if (!containsCidr(routeAddresses, "::/0")) routeAddresses.put("::/0")
 
         val exclusions = tun.optJSONArray("route_exclude_address")
-        require(exclusions == null || !(0 until exclusions.length()).any {
-            exclusions.optString(it) in setOf("0.0.0.0/0", "::/0")
-        }) {
-            "Профиль исключает весь IPv4 или IPv6 трафик из туннеля"
+        val excludedCidrs = exclusions?.let { array ->
+            (0 until array.length()).map { array.optString(it) }.toSet()
+        }.orEmpty()
+        val excludesAllIpv4 = "0.0.0.0/0" in excludedCidrs ||
+            ("0.0.0.0/1" in excludedCidrs && "128.0.0.0/1" in excludedCidrs)
+        val excludesAllIpv6 = "::/0" in excludedCidrs ||
+            ("::/1" in excludedCidrs && "8000::/1" in excludedCidrs)
+        require(!excludesAllIpv4 && !excludesAllIpv6) {
+            "Профиль исключает всё адресное пространство IPv4 или IPv6 из туннеля"
         }
 
         val includePackages = tun.optJSONArray("include_package")
