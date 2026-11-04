@@ -64,9 +64,10 @@ internal object OpenVpnProfileSanitizer {
                         throw IOException("The inline CA certificate is incomplete")
                     }
                     activeBlock = null
-                    if (block == "auth-user-pass") {
-                        // Do not export embedded credentials from an untrusted profile.
-                        output.appendLine("auth-user-pass")
+                    when (block) {
+                        "auth-user-pass" -> output.appendLine("auth-user-pass")
+                        "http-proxy-user-pass" -> Unit
+                        else -> output.appendLine(line)
                     }
                     return@forEach
                 }
@@ -114,6 +115,9 @@ internal object OpenVpnProfileSanitizer {
             if (openingBlock != null) {
                 activeBlock = openingBlock
                 if (openingBlock == "auth-user-pass") hasAuthUserPass = true
+                if (openingBlock != "auth-user-pass" && openingBlock != "http-proxy-user-pass") {
+                    output.appendLine(line)
+                }
                 return@forEach
             }
 
