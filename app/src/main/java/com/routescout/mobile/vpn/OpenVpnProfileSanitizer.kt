@@ -1,24 +1,34 @@
 package com.routescout.mobile.vpn
 
+import java.io.ByteArrayInputStream
 import java.io.IOException
+import java.security.cert.CertificateFactory
 import java.util.Locale
 
 /**
  * Sanitizes untrusted VPN Gate OpenVPN profiles before handing them to another client.
- * This is a constrained parser, not a complete OpenVPN parser.
+ *
+ * This is a constrained parser, not a complete OpenVPN parser. It validates the
+ * structure of trust material and rejects local file references/proxy settings
+ * that this importer cannot safely normalize. The TLS engine still performs
+ * cryptographic chain and peer verification when the tunnel is established.
  */
 internal object OpenVpnProfileSanitizer {
     private val inlineBlocks = setOf(
         "ca", "cert", "key", "tls-auth", "tls-crypt", "tls-crypt-v2",
         "pkcs12", "crl-verify", "dh", "extra-certs", "secret",
-        "auth-gen-token-secret", "peer-fingerprint", "auth-user-pass",
-        "http-proxy-user-pass"
+        "peer-fingerprint", "auth-user-pass", "http-proxy-user-pass",
+        "auth-gen-token-secret"
+    )
+
+    private val discardedInlineBlocks = setOf(
+        "auth-user-pass", "http-proxy-user-pass", "auth-gen-token-secret"
     )
 
     private val fileDirectives = setOf(
         "ca", "capath", "cert", "key", "tls-auth", "tls-crypt", "tls-crypt-v2",
         "pkcs12", "crl-verify", "dh", "extra-certs", "secret",
-        "auth-gen-token-secret", "askpass", "tls-export-cert", "http-proxy-user-pass"
+        "askpass", "tls-export-cert", "http-proxy-user-pass"
     )
 
     private val strippedDirectives = setOf(
@@ -27,7 +37,7 @@ internal object OpenVpnProfileSanitizer {
         "user", "group", "setcon", "iproute", "tmp-dir", "script-security",
         "client-connect", "client-disconnect", "learn-address", "tls-verify",
         "auth-user-pass-verify", "tls-crypt-v2-verify", "client-config-dir",
-        "verify-hash"
+        "verify-hash", "auth-gen-token-secret"
     )
 
     private val unsupportedProxyDirectives = setOf(
@@ -45,6 +55,7 @@ internal object OpenVpnProfileSanitizer {
         }
 
         val output = StringBuilder()
+        val caPem = StringBuilder()
         var activeBlock: String? = null
         var hasClient = false
         var hasRemote = false
@@ -60,25 +71,29 @@ internal object OpenVpnProfileSanitizer {
                 val block = activeBlock
 
                 if (trimmed.equals("</$block>", ignoreCase = true)) {
-                    if (block == "ca" && caCertificateOpen) {
-                        throw IOException("The inline CA certificate is incomplete")
+                    if (block == "ca") {
+                        if (caCertificateOpen) {
+                            throw IOException("The inline CA certificate is incomplete")
+                        }
+                        validateCaCertificates(caPem.toString())
+                        hasInlineCaCertificate = true
                     }
+
                     activeBlock = null
-                    when (block) {
-                        "auth-user-pass" -> output.appendLine("auth-user-pass")
-                        "http-proxy-user-pass" -> Unit
+                    when {
+                        block == "auth-user-pass" -> output.appendLine("auth-user-pass")
+                        block in discardedInlineBlocks -> Unit
                         else -> output.appendLine(line)
                     }
                     return@forEach
                 }
 
-                if (block == "auth-user-pass" || block == "http-proxy-user-pass") {
-                    // Drop inline credentials. The auth-user-pass prompt is restored only
-                    // when the original profile explicitly requested user authentication.
+                if (block in discardedInlineBlocks) {
                     return@forEach
                 }
 
                 if (block == "ca") {
+                    caPem.appendLine(line)
                     if (trimmed == "-----BEGIN CERTIFICATE-----") {
                         if (caCertificateOpen) {
                             throw IOException("The inline CA certificate has a nested BEGIN marker")
@@ -89,7 +104,6 @@ internal object OpenVpnProfileSanitizer {
                             throw IOException("The inline CA certificate has an unmatched END marker")
                         }
                         caCertificateOpen = false
-                        hasInlineCaCertificate = true
                     }
                 }
 
@@ -115,9 +129,8 @@ internal object OpenVpnProfileSanitizer {
             if (openingBlock != null) {
                 activeBlock = openingBlock
                 if (openingBlock == "auth-user-pass") hasAuthUserPass = true
-                if (openingBlock != "auth-user-pass" && openingBlock != "http-proxy-user-pass") {
-                    output.appendLine(line)
-                }
+                if (openingBlock == "ca") caPem.appendLine(line)
+                if (openingBlock !in discardedInlineBlocks) output.appendLine(line)
                 return@forEach
             }
 
@@ -134,6 +147,7 @@ internal object OpenVpnProfileSanitizer {
             }
 
             if (directive.startsWith("management")) return@forEach
+            if (directive.startsWith("pkcs11-")) return@forEach
             if (directive in strippedDirectives) return@forEach
 
             if (directive in fileDirectives) {
@@ -161,6 +175,14 @@ internal object OpenVpnProfileSanitizer {
 
             if (directive == "client") hasClient = true
 
+            if (directive == "dev") {
+                val device = stripInlineComment(parts.getOrNull(1).orEmpty())
+                    .lowercase(Locale.ROOT)
+                if (device != "tun") {
+                    throw IOException("Only OpenVPN TUN profiles are supported")
+                }
+            }
+
             if (directive == "remote") {
                 val remoteParts = trimmed.split(Regex("\\s+"))
                 val port = remoteParts.getOrNull(2)?.toIntOrNull()
@@ -187,7 +209,7 @@ internal object OpenVpnProfileSanitizer {
             throw IOException("The OpenVPN profile is missing a valid client or remote endpoint")
         }
         if (!hasInlineCaCertificate && !hasPeerFingerprint) {
-            throw IOException("The OpenVPN profile has no valid inline CA certificate or SHA-256 peer fingerprint")
+            throw IOException("The OpenVPN profile has no parseable inline X.509 CA certificate or SHA-256 peer fingerprint")
         }
 
         val hasRemoteCertTlsServer = output.lineSequence().any { line ->
@@ -203,7 +225,21 @@ internal object OpenVpnProfileSanitizer {
             output.appendLine("auth-user-pass")
         }
 
-        return output.toString().trimEnd() + "\n"
+        return output.toString().trimEnd() + "\\n"
+    }
+
+    private fun validateCaCertificates(pem: String) {
+        try {
+            val certificates = CertificateFactory.getInstance("X.509")
+                .generateCertificates(ByteArrayInputStream(pem.toByteArray(Charsets.US_ASCII)))
+            if (certificates.isEmpty()) {
+                throw IOException("The inline CA block contains no X.509 certificate")
+            }
+        } catch (error: IOException) {
+            throw error
+        } catch (error: Exception) {
+            throw IOException("The inline CA block is not a parseable X.509 certificate bundle", error)
+        }
     }
 
     private fun stripInlineComment(value: String): String =
