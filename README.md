@@ -17,13 +17,13 @@ Implemented in this branch:
 - Server ranking based on VPN Gate's published score, ping, and throughput.
 - On-demand TCP endpoint checks from the device; UDP is explicitly marked unverified until an actual VPN handshake.
 - AUTO preflight of up to five top-ranked candidates, preferring a TCP endpoint that is reachable from the device and falling back to an unverified UDP profile only when needed.
-- Temporary .ovpn profile export through Android FileProvider.
+- Size-limited .ovpn profile export through Android FileProvider, using unique temporary filenames and expiry cleanup.
 - OpenVPN profile filtering that removes local script/plugin/management directives and rejects external certificate paths.
-- Unit tests for CSV parsing, server selection, WireGuard handshake evidence, the shared VPN engine contract, connection coordination, and OpenVPN profile sanitization.
-- A shared VPN engine contract and serialized connection coordinator. The coordinator is a tested foundation; the current UI still uses the existing WireGuard connection flow directly.
-- OpenVPN profile hardening: reject external certificate/key paths and profiles without a CA or peer fingerprint; enforce `remote-cert-tls server`; remove local script and management directives.
+- Unit tests for CSV parsing, server selection, WireGuard handshake evidence, engine coordination, app-routing validation, X.509/peer-fingerprint checks, and OpenVPN profile sanitization.
+- The shared VPN engine contract and serialized connection coordinator are now used by the WireGuard connect/disconnect UI path. Before switching, every registered engine is asked to stop and its live status is checked; a running or unqueryable engine blocks the next start. The current registry contains WireGuard only.
+- OpenVPN profile hardening: parse inline X.509 certificates, validate SHA-256 peer fingerprints, reject external certificate/key paths, strip inline credentials and local script/management directives, reject unsupported proxy/TAP profiles, and preserve an authentication prompt only when the source profile explicitly requests it. `remote-cert-tls server` is added when CA validation is used; a valid peer fingerprint is accepted as the alternative identity check.
 - Proton VPN Free setup path using the existing in-app WireGuard backend after the user downloads a configuration from the official account portal.
-- WireGuard peer handshake and received-traffic verification before the UI reports a successful WireGuard connection.
+- A lightweight HTTPS request through RouteScout's active route before accepting a WireGuard handshake; RouteScout is rejected from profile-level app exclusions/allow-lists that would bypass the probe.
 - Public IPv4/IPv6 lookup using independent ipify and ipapi.co sources, country/ASN metadata, and same-family IP-source comparison.
 - Direct DNS/HTTPS reachability probes for foreign websites, compared with example.com as a neutral control. The result is a heuristic, not proof of ISP filtering.
 - Before/after public-IP comparison around an in-app WireGuard connection; the UI reports a changed IP only when two successful lookups differ.
@@ -36,7 +36,7 @@ Not implemented yet:
 - Automated Proton account authentication/configuration retrieval. Proton's official account portal is used for config generation; RouteScout does not scrape private endpoints or store Proton credentials.
 - Automatic server failover after an OpenVPN tunnel drops or a multi-profile WireGuard failover manager.
 - Automatic switching to a backup server after a failed connection (the current WireGuard flow compares the public IP before and after connection but does not automatically rotate servers).
-- Per-app and per-domain routing.
+- App- and domain-routing controls shared across all engines (WireGuard can still honor app filters already present in an imported profile; RouteScout validates that its own diagnostic traffic is not excluded).
 - Full speed, packet-loss, jitter, and leak testing.
 
 The UI deliberately does not invent server locations, connection states, ping values, or foreign IP addresses. WireGuard is only shown as connected after a recent peer handshake and post-connect traffic evidence are observed.
