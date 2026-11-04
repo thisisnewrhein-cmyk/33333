@@ -4,7 +4,7 @@ Android application for network diagnostics, VPN profile management, and intelli
 
 ## Current status
 
-**0.5.0 — foreign-site diagnostics and background catalog refresh**
+**0.6.0 — shared VPN engine contract and serialized tunnel lifecycle**
 
 Implemented in this branch:
 - Native Android project using Kotlin and Jetpack Compose.
@@ -26,17 +26,21 @@ Implemented in this branch:
 - Direct DNS/HTTPS reachability probes for foreign websites, compared with example.com as a neutral control. The result is a heuristic, not proof of ISP filtering.
 - Before/after public-IP comparison around an in-app WireGuard connection; the UI reports a changed IP only when two successful lookups differ.
 - WorkManager background refresh of the VPN Gate catalog, with a 15-minute periodic request subject to Android battery and network scheduling.
+- A shared VPN engine contract and serialized connection coordinator; the active WireGuard UI flow now uses the coordinator for connect, disconnect, and live status.
+- A WireGuard engine adapter that requires a recent peer handshake and received-traffic evidence; unit tests cover engine switching, shutdown verification, unverified tunnels, and multiple active engines.
 - Local catalog cache containing up to 120 public profiles and recent TCP preflight results; the background worker rechecks up to 12 top-ranked candidates per refresh.
 
 Not implemented yet:
 - An embedded OpenVPN engine. VPN Gate profiles are currently handed off to an installed OpenVPN client; RouteScout does not yet own that OpenVPN tunnel.
+- An embedded sing-box/libbox runtime. The engine contract is ready, but the current APK does not yet include libbox or its additional protocols.
+- A RouteScout-owned replacement VPN service; the existing WireGuard GoBackend remains the only active VPN service in this milestone.
 - Automated Proton account authentication/configuration retrieval. Proton's official account portal is used for config generation; RouteScout does not scrape private endpoints or store Proton credentials.
 - Automatic server failover after an OpenVPN tunnel drops or a multi-profile WireGuard failover manager.
 - Automatic switching to a backup server after a failed connection (the current WireGuard flow compares the public IP before and after connection but does not automatically rotate servers).
 - Per-app and per-domain routing.
 - Full speed, packet-loss, jitter, and leak testing.
 
-The UI deliberately does not invent server locations, connection states, ping values, or foreign IP addresses. WireGuard is only shown as connected after a recent peer handshake and post-connect traffic evidence are observed.
+The UI deliberately does not invent server locations, connection states, ping values, or foreign IP addresses. WireGuard is only shown as connected after a recent peer handshake and post-connect traffic evidence are observed. If the coordinator cannot confirm that a previous engine stopped, it refuses to start another one.
 
 ## Important infrastructure note
 
@@ -67,14 +71,20 @@ The visual language follows the supplied reference image:
 - compact metric cards and clear status hierarchy;
 - no generic bright gradients or fake analytics.
 
+## Architecture and licensing
+
+The current engine contract, Android VPN ownership rules, hybrid EXIT/RELAY model, leak policy, and release gates are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Research decisions and the verified libbox candidate artifact are recorded in [docs/RESEARCH_DECISIONS.md](docs/RESEARCH_DECISIONS.md).
+
+Original RouteScout code is licensed under GPL-3.0-only. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The libbox runtime is a planned dependency and is not bundled yet.
+
 ## Next engineering milestones
 
-1. Integrate a maintained OpenVPN engine into RouteScout, subject to compatible licensing and Android lifecycle review.
-2. Integrate and observe an in-app OpenVPN handshake state and tunnel byte counters, subject to compatible licensing.
+1. Integrate the pinned libbox 1.14.4 Android runtime behind the shared engine contract after verifying the AAR digest and source/build recipe.
+2. Implement one RouteScout-owned Android VPN service and the libbox platform interface; migrate away from the WireGuard-owned VPN service only after lifecycle parity tests pass.
 3. Verify public IPv4/IPv6, DNS routing, and leaks after a real handshake.
-4. Extend measured server health checks beyond the current top-12 TCP preflight and add automatic failover with bounded retries.
-5. Add IPv6/DNS leak verification, jitter, packet-loss sampling, and opt-in throughput tests.
-6. Add country filters, favourites, multi-profile storage, and server history.
-7. Validate on physical Android devices and build a release APK.
+4. Extend measured server health checks and add automatic failover with bounded retries.
+5. Integrate an embedded OpenVPN engine only if it adds measurable value beyond libbox.
+6. Deploy the first owned EXIT, then add a second independent EXIT and volunteer RELAY support.
+7. Validate on physical Android devices and produce a reproducible GPL-compliant release.
 
 CI note: the workflow uses the runner's preinstalled Android SDK command-line tools.

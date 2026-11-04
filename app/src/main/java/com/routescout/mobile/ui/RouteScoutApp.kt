@@ -336,7 +336,11 @@ fun RouteScoutApp() {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            vpnMessage = "Не удалось прочитать профиль или подтвердить состояние VPN"
+            isVpnConnected = false
+            // Unknown startup state is treated as potentially active to prevent
+            // a second VPN from being started while the system tunnel is uncertain.
+            isVpnTunnelUp = true
+            vpnMessage = "Не удалось подтвердить состояние VPN. Перед новым подключением проверь системный статус VPN."
         }
     }
 
