@@ -202,7 +202,7 @@ class DiagnosticReportExporter(context: Context) {
     fun createShareIntent(file: File): Intent {
         val uri: Uri = FileProvider.getUriForFile(
             appContext,
-            "\${appContext.packageName}.fileprovider",
+            "${appContext.packageName}.fileprovider",
             file
         )
         return Intent(Intent.ACTION_SEND).apply {
