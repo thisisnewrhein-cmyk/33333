@@ -1,171 +1,247 @@
 # RouteScout — architecture and implementation boundaries
 
-**Status:** architecture baseline for the Android MVP  
+**Status:** Android MVP with a first embedded multi-protocol engine  
 **Last reviewed:** 2026-11-04  
-**Platform:** Android only  
-**License:** GPL-3.0-only for original project code
+**Platform:** Android 8.0+ (API 26+)  
+**Original project license:** GPL-3.0-only
 
 ## 1. Product objective
 
-RouteScout is an Android system VPN client with local network diagnostics, evidence-based route selection, and a gradually expandable hybrid network:
+RouteScout is an Android system VPN client with on-device diagnostics and evidence-based route selection.
+
+The eventual network model has three roles:
 
 - **EXIT:** project-controlled servers that provide public internet egress.
-- **RELAY:** optional volunteer-operated forwarding nodes. Initially they forward an encrypted client-to-EXIT stream and are not trusted as internet EXITs.
-- **CONTROL PLANE:** a signed node catalogue and configuration distribution service. It is not on the user traffic path.
+- **RELAY:** optional forwarding nodes that carry an encrypted client-to-EXIT stream and are not trusted as internet EXITs.
+- **CONTROL PLANE:** signed node catalogue and configuration distribution. It is not on the user traffic path.
 
-A route is not considered working because a server appears in a catalogue or responds to a TCP probe. A connection is accepted only after the engine reports a live tunnel and protocol-specific evidence of a reachable peer.
-
-No VPN design can guarantee access through every network restriction. A usable route still requires a reachable endpoint, valid credentials, a supported protocol, and sufficient capacity.
+The EXIT/RELAY network is a target architecture, not an already deployed service. This repository does not currently contain an owned EXIT server, public relay enrollment, or a signed node registry.
 
 ## 2. Runtime architecture
 
-1. **Android UI (Jetpack Compose):** profile import, connection state, diagnostics, server selection and settings.
-2. **Network Observer:** active network, DNS/HTTPS probes, public IPv4/IPv6 observations, route changes and timing.
-3. **Diagnosis Engine:** classifies DNS, TCP, TLS, authentication, handshake, route and timeout failures. Filtering remains a hypothesis unless independent evidence supports it.
-4. **VPN Engine adapters:** common lifecycle contract for WireGuard, planned libbox and planned embedded OpenVPN.
-5. **Connection Coordinator:** serializes engine changes, verifies shutdown before switching and rejects unverified connection states.
-6. **Local State:** Android Keystore for key material; app-private storage for profiles; Room is a future option for structured session history.
-7. **Control Plane client:** downloads a signed, expiring node manifest. Cached manifests are used only while their signature and validity window remain acceptable.
+1. **Android UI (Jetpack Compose):** profile import, connection state, server selection, quick diagnostics, full self-diagnostics, and report sharing.
+2. **Network Observer:** active Android Network, validation/metering state, DNS observations, HTTPS probes, public IPv4/IPv6, and route-related state.
+3. **Diagnosis Engine:** classifies DNS, HTTPS, handshake, route, and timeout symptoms. Operator filtering remains a hypothesis unless independent evidence supports it.
+4. **VPN engine adapters:** existing WireGuard GoBackend adapter and the new sing-box/libbox adapter.
+5. **Connection Coordinator:** serializes transitions, verifies shutdown, and rejects unverified connection states.
+6. **Encrypted local state:** Android Keystore-backed AES-GCM profile stores; profile contents are never written to diagnostics.
+7. **Optional provider workflows:** VPN Gate catalog and OpenVPN handoff remain separate from the embedded sing-box engine.
 
-## 3. One Android VPN owner
+## 3. Android VPN ownership and service lifecycle
 
-Android's VPN service API is the system boundary for device-wide VPN routing. The current app uses the WireGuard Android GoBackend service. It remains the only active VPN service in this milestone. The ConnectionCoordinator serializes RouteScout's engine lifecycle and the UI now uses it for WireGuard connect, disconnect and status checks.
+The current branch contains two VPN service implementations:
 
-When libbox is introduced, it must use a RouteScout-owned VPN service and become the single TUN owner. The existing GoBackend service must then be removed from the active path; two independent VPN services must never compete for the device route.
+- WireGuard Android's existing \`GoBackend.VpnService\`.
+- RouteScout's new \`RouteScoutVpnService\`, which hosts libbox.
 
-A state that cannot be verified is treated as unsafe. The app must refuse to start another engine until it can confirm that the previous tunnel has stopped.
+Android permits one active VPN connection per Android user/profile. RouteScout's coordinator stops and verifies the previous engine before starting another. The two service implementations are not intended to run concurrently.
 
-## 4. Full-device routing and leak policy
+**Important limitation:** WireGuard has not yet been migrated into \`RouteScoutVpnService\`. It is therefore accurate to say the app serializes two VPN backends, but not that a single service implementation owns all protocols. Consolidating WireGuard and libbox under one service is a later migration requiring parity and physical-device tests.
 
-The target profile is full-device routing, not browser-only proxying:
+A state that cannot be verified is treated as unsafe. If libbox shutdown cannot be confirmed, the service retains a conservative active marker and the coordinator refuses to start another engine.
 
-- IPv4 default route: 0.0.0.0/0.
-- IPv6 default route: ::/0 when the selected engine and EXIT support IPv6.
-- DNS: use resolvers reachable through the tunnel.
-- If IPv6 cannot be tunneled, block IPv6 rather than silently allowing it to bypass the VPN.
-- Do not silently fall back to direct internet when a tunnel fails.
-- Per-app routing is a later optional feature; full-device routing is the default.
+## 4. sing-box/libbox integration
 
-Android Always-on VPN with "Block connections without VPN" is the system-level lockdown mechanism. RouteScout can guide the user to enable it, but must not claim that an in-app flag alone provides equivalent protection after process death or service failure.
+Pinned dependency:
 
-## 5. Engine contract
+- Maven coordinate: \`com.github.singbox-android:libbox:1.14.4\`
+- Packaging repository: https://github.com/singbox-android/libbox
+- Official AAR release: https://github.com/singbox-android/libbox/releases/tag/1.14.4
+- AAR size: 118,293,410 bytes.
+- Official SHA-256: \`d2685924a657705beda44e94c6dc499e781df1ad20d65474e3591ec2f8b96465\`
 
-The package com.routescout.mobile.vpn contains:
+The \`verifyLibboxAar\` Gradle task streams the resolved artifact through SHA-256 and is a dependency of \`preBuild\`. The task must pass before the app can be built.
 
-- VpnEngine: engine identity, supported protocols, connect, disconnect and live status.
-- VpnEngineStatus: separates local tunnel state (isRunning) from verified remote connectivity (isVerified).
-- ConnectionCoordinator: serializes all engine transitions and re-reads live status before accepting a connection.
-- WireGuardEngineAdapter: adapts the existing WireGuard backend and requires a successful HTTPS probe through the tunnel, a recent peer handshake, and an increase in received bytes. A handshake alone is not proof of payload connectivity.
+### Android platform bridge
 
-Only WireGuard is registered in the current UI. SING_BOX and OPENVPN are planned engine identifiers, not claims of implemented support.
+\`RouteScoutVpnService\` implements the Android \`VpnService\` lifecycle and creates the TUN descriptor requested by libbox. \`RouteScoutPlatformInterface\`:
 
-## 6. Transport strategy
+- protects upstream sockets with \`VpnService.protect(fd)\`;
+- reports non-VPN interfaces and monitors underlying networks;
+- supplies Android connection-owner information where the API supports it;
+- disables root shell, root bridge, root auto-redirect, and neighbor-monitor features;
+- does not collect Wi-Fi SSID/BSSID or location;
+- does not log raw native messages, because configuration values may appear in error output.
 
-### MVP
+The service uses an Android foreground-service notification and releases the TUN descriptor and command server during shutdown. Shutdown failure is not treated as success.
 
-- **WireGuard:** first owned EXIT transport; already present in the app.
-- **Second transport:** add only after the first engine is stable and tested on physical networks. Shadowsocks is a candidate, but protocol choice must be based on current upstream support, implementation quality and independent network testing.
+### Accepted sing-box profiles
 
-### Later evaluation
+The app accepts sing-box JSON only when it has:
 
-- sing-box/libbox can provide multiple maintained transports behind one engine and one Android VPN service.
-- Hysteria2 and TUIC depend on UDP/QUIC reachability and are not universal fallbacks.
-- WebTunnel/Snowflake are separate Tor-related modes, not drop-in replacements for RouteScout's own EXIT network.
-- MASQUE is an HTTP-based tunnel standard, not a guarantee of censorship resistance.
-- ECH is a TLS privacy feature, not a VPN transport.
+- a TUN inbound;
+- at least one supported proxy outbound;
+- a final route that is not \`direct\`, \`block\`, or \`dns\`.
 
-RouteScout must not describe any transport as invisible to DPI or universally unblockable.
+The profile normalizer then:
 
-## 7. Hybrid node model
+- enables \`auto_route\`;
+- adds IPv4 and IPv6 TUN addresses if missing;
+- adds IPv4 and IPv6 default routes;
+- enables DNS hijacking;
+- enables \`route.auto_detect_interface\` to protect upstream sockets from routing back into TUN;
+- preserves profile route exclusions, but rejects exclusions that cover all IPv4 or all IPv6;
+- rejects simultaneous Android app allowlist and blocklist configuration because Android's VPN builder does not support both in one session.
 
-### EXIT nodes
+The normalizer may change imported route behaviour to enforce RouteScout's full-device default. The app does not silently claim that an arbitrary proxy-only config is a system VPN.
 
-- Initially one project-controlled Linux server.
-- Add a second EXIT at a different provider/network only after the first has measured demand.
-- Keep control-plane administration separate from public user traffic when practical.
-- Apply per-user rate limits, connection limits, abuse handling, security updates and egress monitoring.
+### Embedded protocols
 
-### Volunteer RELAY nodes
+The adapter recognizes sing-box outbounds for:
 
-- Default role is encrypted forwarding only, not public internet egress.
-- A relay can observe the client's source IP, the next-hop relay/EXIT, timing and traffic volume. It must not receive the inner tunnel keys or plaintext DNS/HTTP contents.
-- Relay identity is authenticated and revocable.
-- Node enrollment is explicit; arbitrary public proxies are not automatically trusted.
-- NAT/CGNAT can prevent inbound reachability. A volunteer device is not assumed to be a usable relay merely because it is online.
+- Shadowsocks
+- VMess
+- VLESS
+- Trojan
+- Hysteria2
+- TUIC
+- AnyTLS
 
-### Signed node registry
+WireGuard remains on the existing GoBackend path. OpenVPN is not provided by sing-box in this integration and continues to use an installed OpenVPN client through the existing handoff.
 
-Each manifest entry should include node ID, role, endpoint, public key, supported transport, capacity, health observation, expiry and signature. The client verifies signatures before applying configuration. Key rotation and revocation must be designed before public enrollment.
+Imported sing-box \`selector\`/\`urltest\` groups can perform profile-defined server selection. RouteScout does not yet maintain its own multi-provider health-ranked failover catalogue.
+
+## 5. Full-device routing and leak policy
+
+The intended default is full-device routing:
+
+- IPv4 default route: \`0.0.0.0/0\`.
+- IPv6 default route: \`::/0\`.
+- DNS hijacking is enabled in normalized sing-box TUN profiles.
+- If the remote outbound cannot carry IPv6, IPv6 traffic is still captured by TUN and should fail closed rather than silently use the physical network.
+- Direct final outbounds and selectors that can choose a direct final route are rejected.
+- The user can enable Android Always-on VPN with "Block connections without VPN" for system-level lockdown.
+
+The app has not yet passed a formal DNS/IPv6 leak suite on physical devices. Route construction is an implementation property, not proof that every Android OEM, captive portal, or process-death path behaves correctly.
+
+## 6. WireGuard verification
+
+WireGuard is reported connected only when all of these are true:
+
+1. the GoBackend reports a running tunnel;
+2. a recent peer handshake is observed;
+3. a successful HTTPS request was made after connection;
+4. received-byte counters increased relative to the pre-connect snapshot.
+
+A handshake alone is not proof that payload traffic is passing.
+
+For sing-box, there is no generic per-peer handshake field exposed by this adapter. The app requires the libbox service to start, Android to expose a VPN Network, and a successful HTTPS request explicitly bound to that VPN Network. A background monitor repeats a small HTTPS check every 30 seconds.
+
+## 7. Full self-diagnostics and report format
+
+The Diagnostics screen can run a full local check and open Android's Sharesheet with a JSON report.
+
+The report includes:
+
+- report schema version, timestamp, app version, Android release/API, manufacturer/model;
+- profile type and engine state;
+- VPN running/verified state, byte counters where exposed, and handshake age where available;
+- Android network type, validation/metering/captive-portal flags, VPN transport state, and observed DNS servers;
+- DNS/HTTPS/site/public-IP results;
+- five repeated HTTPS response-time samples, failure ratio, and adjacent-sample latency variation;
+- findings with severity and confidence;
+- explicit measurement limitations.
+
+Privacy defaults:
+
+- exact public IP, DNS addresses, and VPN endpoint are masked;
+- exact network values are included only after the user enables the opt-in checkbox;
+- profile JSON, private keys, passwords, UUIDs, tokens, SSID/BSSID, location, serial numbers, Android IDs, and raw native logs are never exported;
+- report generation is local; nothing is uploaded automatically.
+
+Interpretation boundaries:
+
+- repeated HTTPS failure ratio is not ICMP packet loss;
+- adjacent HTTPS latency variation is not a formal jitter benchmark;
+- DNS server addresses and successful DNS resolution do not prove absence of DNS leaks;
+- same public IP before and after VPN is not by itself proof of a leak;
+- destination-specific reachability failure does not identify the network operator or prove censorship.
 
 ## 8. Smart routing and failover
 
-A candidate is eligible only after profile validation and a successful protocol handshake. TCP reachability alone is not proof of tunnel viability.
+Current capability:
 
-Ranking may consider:
-- recent handshake and connection success rate;
-- latency, jitter and packet loss measured from the device;
-- actual throughput, measured only with user consent;
-- server load and remaining capacity;
-- independence of provider, address range and network path;
-- recent failures on the current access network.
-
-Retries are bounded and avoid repeatedly selecting the same failed endpoint. Switching routes can break existing TCP sessions; RouteScout can restore new connections but must not promise seamless preservation of every existing session.
-
-## 9. Privacy and security defaults
-
-- Profile contents and private keys remain in app-private storage.
-- Private keys must never be logged, exported in diagnostics or committed to Git.
-- Diagnostic history is local by default.
-- Public-IP services see the address making the request; the UI discloses the services used.
-- Report export/upload requires explicit user action.
-- Untrusted volunteer relays are labelled as such.
-- No silent direct-connection fallback.
-- No custom cryptographic algorithms.
-
-## 10. Current implementation status
-
-Implemented in the working branch:
-- Kotlin and Jetpack Compose application.
-- WireGuard through the WireGuard Android tunnel library.
-- Encrypted WireGuard profile storage using Android Keystore.
-- Local DNS/HTTPS and public-IP diagnostics.
-- VPN Gate catalogue and explicit OpenVPN profile handoff.
-- WireGuard handshake and received-traffic verification.
-- Shared engine contract, serialized coordinator and WireGuard adapter.
-- UI connect/disconnect/status flow routed through the coordinator.
-- Unit tests for coordinator state transitions.
+- sing-box profiles may include their own \`selector\` and \`urltest\` outbounds;
+- the imported final route must lead to a supported proxy path;
+- the coordinator serializes engine transitions and refuses to proceed when shutdown is uncertain.
 
 Not implemented:
-- Embedded libbox runtime.
-- RouteScout-owned replacement VPN service.
-- Embedded OpenVPN engine.
-- Own EXIT server deployment.
-- Volunteer RELAY agent or signed public node registry.
-- Automatic multi-server failover.
-- Full DNS/IPv6 leak test suite and physical-device acceptance tests.
 
-## 11. libbox dependency decision
+- RouteScout-owned multi-provider server catalogue with measured health;
+- independent EXIT diversity and relay enrolment;
+- automatic cross-provider failover after a live tunnel drops;
+- formal packet-loss, throughput, and DNS-leak tests.
 
-The sing-box 1.14.4 release and the singbox-android/libbox 1.14.4 Android AAR release were checked on 2026-11-04.
+Switching routes can break existing TCP sessions. RouteScout must not promise seamless preservation of all existing connections.
 
-- AAR release: https://github.com/singbox-android/libbox/releases/tag/1.14.4
-- AAR SHA-256: d2685924a657705beda44e94c6dc499e781df1ad20d65474e3591ec2f8b96465
-- AAR size: 118,293,410 bytes.
-- Upstream sing-box release: https://github.com/SagerNet/sing-box/releases/tag/v1.14.4
+## 9. Hybrid node model — target only
 
-The Android AAR is distributed by the separate singbox-android/libbox packaging repository through GitHub Releases/JitPack; it is not committed to the app repository. Before integration, pin the exact version, verify the artifact digest in CI, inspect the source/build recipe and licenses, and test the native ABI on supported Android architectures. The dependency is not included in this milestone.
+### EXIT nodes
 
-The sing-box Android reference client demonstrates use of Android VPN service and a PlatformInterface implementation:
-https://github.com/SagerNet/sing-box-for-android
+A future first deployment should use one project-controlled Linux server, followed by a second server at an independent provider/network after demand is measured. Each EXIT needs rate limits, connection limits, abuse handling, patching, and egress monitoring.
 
-## 12. Release gates
+### Volunteer RELAY nodes
+
+The default relay role should forward an encrypted client-to-EXIT stream, not expose a volunteer's residential address as public internet egress. A relay can still observe client source IP, next hop, timing, and traffic volume. Enrollment must be explicit, authenticated, revocable, and tested against NAT/CGNAT reachability.
+
+### Signed registry
+
+A future node manifest should include node ID, role, endpoint, public key, supported transport, capacity, health observation, expiry, and signature. Key rotation and revocation are release gates before public enrollment.
+
+## 10. Privacy and security defaults
+
+- Profiles remain in app-private encrypted storage.
+- Private keys and credentials are never logged or included in reports.
+- Diagnostic reports are generated only after explicit user action.
+- Public-IP providers see the public IP making each request.
+- Untrusted volunteer relays must be labelled as untrusted.
+- No silent direct-network fallback is intended.
+- No custom cryptographic algorithms are introduced.
+- Root-only libbox integrations are disabled.
+
+## 11. Current implementation status
+
+Implemented in this branch:
+
+- WireGuard GoBackend engine and encrypted profile store.
+- Shared engine contract and serialized coordinator.
+- sing-box/libbox 1.14.4 dependency and checksum-verification Gradle task.
+- RouteScout foreground VPN service and minimal Android platform interface.
+- Encrypted sing-box profile store.
+- sing-box JSON profile validator/normalizer and protocol detection.
+- Full-tunnel route and DNS-hijack configuration for imported sing-box TUN profiles.
+- Full diagnostics, privacy-aware JSON report, Android Sharesheet export.
+- Unit tests for coordinator lifecycle, profile normalization, diagnostics metrics, and report redaction.
+- Existing VPN Gate catalog and external OpenVPN handoff.
+
+Not implemented or not yet validated:
+
+- Single shared VPN service for WireGuard and libbox.
+- Embedded OpenVPN.
+- Owned EXIT servers, volunteer RELAY agent, signed registry.
+- RouteScout-owned cross-provider automatic failover.
+- Formal external DNS leak and IPv6 leak test suite.
+- Physical-device lifecycle, OEM, Doze, handover, reboot, and lockdown acceptance tests.
+- Production signing and public release.
+
+## 12. Licensing
+
+- RouteScout original code: GPL-3.0-only.
+- libbox Android packaging: GPL-3.0-or-later.
+- Upstream sing-box engine: GPL-3.0-or-later with an additional notice: derivative works may not use the upstream application's name or imply association without prior consent.
+
+License texts are preserved in \`LICENSES/GPL-3.0-or-later.txt\` and \`LICENSES/sing-box-LICENSE.txt\`. RouteScout is independent and is not affiliated with or endorsed by SagerNet or sing-box.
+
+## 13. Release gates
 
 A public beta must not be declared ready until:
-1. A single TUN owner is verified on Android 8+ and supported OEM builds.
-2. IPv4 and IPv6 either route through the tunnel or are safely blocked.
-3. DNS queries do not bypass the tunnel.
-4. The app does not report connected without live protocol evidence.
-5. VPN revoke, process death, reboot, Wi-Fi/mobile handover and Doze are tested.
-6. Always-on/lockdown behaviour is documented and tested.
-7. No credentials or private keys appear in logs, reports or source control.
-8. CI builds from a clean checkout and verifies pinned native artifacts.
+
+1. CI verifies the exact libbox AAR checksum and builds from a clean checkout.
+2. libbox and WireGuard service transitions pass tests on physical devices.
+3. Process death, VPN revoke, reboot, Wi-Fi/mobile handover, Doze, and Always-on lockdown are tested.
+4. IPv4 and IPv6 either route through the tunnel or are safely blocked on supported Android versions.
+5. DNS routing is independently tested for leaks.
+6. The app never reports connected without protocol/data-path evidence.
+7. Shutdown uncertainty blocks another engine from starting.
+8. No credentials, keys, raw config, or private identifiers appear in diagnostics or source control.
+9. GPL source and corresponding build instructions are included in every distributed build.
