@@ -10,6 +10,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.IOException
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -23,6 +24,31 @@ import javax.net.ssl.SSLHandshakeException
 
 class NetworkDiagnosticsRepository(context: Context) {
     private val appContext = context.applicationContext
+
+    /**
+     * Sends one small HTTPS request through the currently active Android route.
+     * A received HTTP response (including a 4xx/5xx response) proves that packets
+     * reached a remote TLS endpoint; DNS resolution alone does not.
+     */
+    suspend fun probeTunnelTraffic() = withContext(Dispatchers.IO) {
+        val connection = URL(TUNNEL_PROBE_URL).openConnection() as HttpsURLConnection
+        connection.connectTimeout = TUNNEL_PROBE_TIMEOUT_MS
+        connection.readTimeout = TUNNEL_PROBE_TIMEOUT_MS
+        connection.requestMethod = "GET"
+        connection.instanceFollowRedirects = false
+        connection.useCaches = false
+        connection.setRequestProperty("Cache-Control", "no-cache")
+        connection.setRequestProperty("Connection", "close")
+
+        try {
+            val responseCode = connection.responseCode
+            if (responseCode !in 100..599) {
+                throw IOException("The tunnel traffic probe received no valid HTTP response")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     suspend fun runQuickCheck(): DiagnosticSnapshot = withContext(Dispatchers.IO) {
         val connectivityManager =
@@ -301,6 +327,9 @@ class NetworkDiagnosticsRepository(context: Context) {
     )
 
     companion object {
+        private const val TUNNEL_PROBE_URL = "https://example.com/"
+        private const val TUNNEL_PROBE_TIMEOUT_MS = 5_000
+
         private const val IPV4_CHECK_URL = "https://api.ipify.org?format=json"
         private const val IPV6_CHECK_URL = "https://api6.ipify.org"
         private const val IP_METADATA_URL = "https://ipapi.co/json/"
