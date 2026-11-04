@@ -155,7 +155,7 @@ class RouteScoutPlatformInterface(
             item.mtu = runCatching { javaInterface.mtu }.getOrDefault(0)
             item.addresses = StringArray(
                 javaInterface.interfaceAddresses.map {
-                    "\${it.address.hostAddress}/\${it.networkPrefixLength}"
+                    "${it.address.hostAddress}/${it.networkPrefixLength}"
                 }.iterator()
             )
             var flags = 0
@@ -200,7 +200,7 @@ class RouteScoutPlatformInterface(
         throw UnsupportedOperationException("SSH host key access is disabled")
 
     override fun lookupSFTPServer(): String = ""
-    override fun tailscaleHostname(): String = "\${Build.MANUFACTURER} \${Build.MODEL}"
+    override fun tailscaleHostname(): String = "${Build.MANUFACTURER} ${Build.MODEL}"
     override fun usePlatformBridge(): Boolean = false
 
     override fun createBridge(options: BridgeOptions?): BridgeSession =
