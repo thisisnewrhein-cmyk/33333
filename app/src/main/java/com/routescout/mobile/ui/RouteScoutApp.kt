@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.VpnService
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -47,6 +49,7 @@ import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -78,6 +81,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.routescout.mobile.diagnostics.DiagnosticSnapshot
+import com.routescout.mobile.diagnostics.FullDiagnosticSnapshot
+import com.routescout.mobile.diagnostics.DiagnosticReportExporter
 import com.routescout.mobile.diagnostics.NetworkDiagnosticsRepository
 import com.routescout.mobile.ui.theme.RouteBackground
 import com.routescout.mobile.ui.theme.RouteBlue
@@ -94,6 +99,7 @@ import com.routescout.mobile.vpn.SingBoxConfigValidator
 import com.routescout.mobile.vpn.SingBoxEngineAdapter
 import com.routescout.mobile.vpn.WireGuardManager
 import com.routescout.mobile.vpn.ConnectionCoordinator
+import com.routescout.mobile.vpn.VpnEngineStatus
 import com.routescout.mobile.vpn.VpnEngineId
 import com.routescout.mobile.vpn.WireGuardEngineAdapter
 import com.routescout.mobile.vpn.FreeVpnServer
@@ -165,6 +171,10 @@ fun RouteScoutApp() {
     var freeServerActionMessage by remember { mutableStateOf<String?>(null) }
     var exportingServerKey by remember { mutableStateOf<String?>(null) }
     var snapshot by remember { mutableStateOf(DiagnosticSnapshot()) }
+    var fullDiagnostics by remember { mutableStateOf<FullDiagnosticSnapshot?>(null) }
+    var isFullDiagnosticsRunning by remember { mutableStateOf(false) }
+    var includeSensitiveReportData by remember { mutableStateOf(false) }
+    var diagnosticReportMessage by remember { mutableStateOf<String?>(null) }
     var preVpnPublicIp by remember { mutableStateOf<String?>(null) }
     var vpnIpChanged by remember { mutableStateOf<Boolean?>(null) }
     var isChecking by remember { mutableStateOf(false) }
@@ -555,8 +565,63 @@ fun RouteScoutApp() {
         if (!isChecking) {
             scope.launch {
                 isChecking = true
-                snapshot = networkDiagnostics.runQuickCheck()
-                isChecking = false
+                try {
+                    snapshot = networkDiagnostics.runQuickCheck()
+                } finally {
+                    isChecking = false
+                }
+            }
+        }
+    }
+
+    val prepareDiagnosticReport: () -> Unit = {
+        if (!isFullDiagnosticsRunning) {
+            scope.launch {
+                isFullDiagnosticsRunning = true
+                diagnosticReportMessage = null
+                try {
+                    val vpnStatus = withContext(Dispatchers.IO) {
+                        runCatching { connectionCoordinator.currentStatus() }
+                            .getOrDefault(VpnEngineStatus.stopped())
+                    }
+                    val vpnNetwork = withContext(Dispatchers.IO) {
+                        val manager = context.getSystemService(ConnectivityManager::class.java)
+                        manager.allNetworks.firstOrNull { network ->
+                            manager.getNetworkCapabilities(network)
+                                ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                        }
+                    }
+                    val full = networkDiagnostics.runFullCheck(vpnNetwork)
+                    fullDiagnostics = full
+                    snapshot = full.quick
+                    val currentStatus = withContext(Dispatchers.IO) {
+                        runCatching { connectionCoordinator.currentStatus() }
+                            .getOrDefault(vpnStatus)
+                    }
+                    val exporter = DiagnosticReportExporter(context)
+                    val reportFile = withContext(Dispatchers.IO) {
+                        exporter.createReport(
+                            full = full,
+                            vpnStatus = currentStatus,
+                            profileEngine = activeProfileEngine.name,
+                            profileEndpoint = profileEndpoint,
+                            profileImported = profileImported,
+                            includeSensitiveNetworkData = includeSensitiveReportData
+                        )
+                    }
+                    diagnosticReportMessage = "Отчёт подготовлен. В системном меню выбери ChatGPT или сохрани JSON-файл."
+                    context.startActivity(
+                        Intent.createChooser(
+                            exporter.createShareIntent(reportFile),
+                            "Отправить отчёт RouteScout"
+                        )
+                    )
+                } catch (error: Exception) {
+                    diagnosticReportMessage =
+                        "Не удалось подготовить отчёт: " + error.javaClass.simpleName
+                } finally {
+                    isFullDiagnosticsRunning = false
+                }
             }
         }
     }
@@ -635,7 +700,13 @@ fun RouteScoutApp() {
                     AppTab.DIAGNOSTICS -> DiagnosticsScreen(
                         snapshot = snapshot,
                         isChecking = isChecking,
-                        onRunDiagnostics = runDiagnostics
+                        onRunDiagnostics = runDiagnostics,
+                        fullSnapshot = fullDiagnostics,
+                        isFullDiagnosticsRunning = isFullDiagnosticsRunning,
+                        includeSensitiveData = includeSensitiveReportData,
+                        onIncludeSensitiveDataChange = { includeSensitiveReportData = it },
+                        onPrepareReport = prepareDiagnosticReport,
+                        reportMessage = diagnosticReportMessage
                     )
                     AppTab.SETTINGS -> SettingsScreen()
                 }
@@ -1534,7 +1605,13 @@ private fun SiteAccessPanel(snapshot: DiagnosticSnapshot) {
 private fun DiagnosticsScreen(
     snapshot: DiagnosticSnapshot,
     isChecking: Boolean,
-    onRunDiagnostics: () -> Unit
+    onRunDiagnostics: () -> Unit,
+    fullSnapshot: FullDiagnosticSnapshot?,
+    isFullDiagnosticsRunning: Boolean,
+    includeSensitiveData: Boolean,
+    onIncludeSensitiveDataChange: (Boolean) -> Unit,
+    onPrepareReport: () -> Unit,
+    reportMessage: String?
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Диагностика", color = RouteText, fontSize = 31.sp, fontFamily = FontFamily.Serif)
@@ -1568,8 +1645,72 @@ private fun DiagnosticsScreen(
                 Text(it, color = RouteCoralSoft, fontSize = 12.sp)
             }
         }
+        Panel {
+            Text("Полная самодиагностика", color = RouteText, fontSize = 19.sp, fontFamily = FontFamily.Serif)
+            Text(
+                "Повторяет HTTPS-проверку пять раз, собирает тип сети, состояние Android Network, DNS-серверы, результаты сайтов и состояние VPN. Отчёт создаётся локально и открывает системное меню отправки.",
+                color = RouteMuted, fontSize = 12.sp, lineHeight = 18.sp
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = includeSensitiveData,
+                    onCheckedChange = onIncludeSensitiveDataChange
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Включить точные IP и endpoint", color = RouteText, fontSize = 13.sp)
+                    Text("По умолчанию адреса маскируются. Профиль и ключи не включаются никогда.", color = RouteMuted, fontSize = 11.sp)
+                }
+            }
+            Button(
+                onClick = onPrepareReport,
+                enabled = !isFullDiagnosticsRunning,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isFullDiagnosticsRunning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Выполняется проверка…")
+                } else {
+                    Text("Запустить проверку и подготовить отчёт")
+                }
+            }
+            reportMessage?.let {
+                Text(it, color = RouteCyan, fontSize = 12.sp, lineHeight = 17.sp)
+            }
+            fullSnapshot?.let { full ->
+                Spacer(Modifier.height(4.dp))
+                Text("Итоги самодиагностики", color = RouteText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                HealthRow("Сеть", full.networkType ?: "Нет данных", full.networkType != null)
+                HealthRow("Android validated", full.networkValidated?.let { if (it) "Да" else "Нет" } ?: "Нет данных", full.networkValidated == true)
+                HealthRow("VPN Network", if (full.vpnTransportActive) "Активна" else "Не обнаружена", full.vpnTransportActive)
+                HealthRow("DNS-серверы", full.dnsServers.size.toString(), full.dnsServers.isNotEmpty())
+                HealthRow(
+                    "Ошибки HTTPS-проб",
+                    full.httpsFailureRatePercent?.let { String.format(Locale.getDefault(), "%.0f%%", it) } ?: "Нет данных",
+                    full.httpsFailureRatePercent == 0.0
+                )
+                HealthRow(
+                    "Вариация HTTPS-задержки",
+                    full.httpsLatencyVariationMs?.let { "$it ms" } ?: "Недостаточно данных",
+                    full.httpsLatencyVariationMs != null
+                )
+                full.findings.forEach { finding ->
+                    Text(
+                        finding.severity + " · " + finding.code + " · уверенность: " + finding.confidence,
+                        color = if (finding.severity == "ERROR") RouteCoralSoft else RouteCyan,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(finding.message, color = RouteMuted, fontSize = 12.sp, lineHeight = 17.sp)
+                }
+            }
+        }
         Text(
-            "Проверяются интернет, DNS, HTTPS и внешний IP. Это ещё не полный тест скорости, jitter, потерь пакетов или DNS-утечек.",
+            "HTTPS failure rate не является ICMP packet loss. Список DNS-серверов не доказывает отсутствие DNS-утечки; приложение не заявляет обратного без внешнего теста.",
             color = RouteMuted,
             fontSize = 11.sp,
             lineHeight = 16.sp
