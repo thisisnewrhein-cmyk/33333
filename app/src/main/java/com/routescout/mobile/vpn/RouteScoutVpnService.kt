@@ -268,7 +268,7 @@ class RouteScoutVpnService : VpnService() {
                 val ipv6Exclusions = options.inet6RouteExcludeAddress
                 while (ipv6Exclusions.hasNext()) {
                     val route = ipv6Exclusions.next()
-                    builder.excludeRoute(IpPrefix("\${route.address()}/\${route.prefix()}"))
+                    builder.excludeRoute(android.net.IpPrefix(InetAddress.getByName(route.address()), route.prefix()))
                 }
             } else {
                 val ipv4Routes = options.inet4RouteRange
