@@ -336,7 +336,7 @@ fun RouteScoutApp() {
                     }
                     profileImported = true
                 } catch (_: Exception) {
-                    vpnMessage = "Не удалось импортировать файл. Нужен корректный WireGuard .conf"
+                    vpnMessage = "Не удалось импортировать файл. Нужен WireGuard .conf или sing-box JSON с TUN."
                 }
             }
         }
@@ -943,8 +943,8 @@ private fun ConnectionPanel(
                 )
                 Text(
                     when {
-                        isVpnConnected -> "WireGuard handshake подтверждён"
-                        isVpnTunnelUp -> "Сервер ещё не подтвердил handshake"
+                        isVpnConnected -> "Соединение через VPN подтверждено"
+                        isVpnTunnelUp -> "Удалённое соединение ещё не подтверждено"
                         profileImported -> "Профиль готов к запуску"
                         else -> "Сервер ещё не настроен"
                     },
@@ -1097,7 +1097,7 @@ private fun ServerPreviewPanel(onOpenServers: () -> Unit) {
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            "Можно импортировать WireGuard-профиль или открыть бесплатный общественный OpenVPN-сервер из каталога VPN Gate.",
+            "Можно импортировать WireGuard .conf или sing-box JSON, а также открыть общественный OpenVPN-сервер из VPN Gate.",
             color = RouteMuted,
             fontSize = 12.sp,
             lineHeight = 18.sp
@@ -1155,14 +1155,14 @@ private fun ServersScreen(
             }
             Spacer(Modifier.height(15.dp))
             Text(
-                if (profileImported) "WireGuard-профиль добавлен" else "Нет добавленных серверов",
+                if (profileImported) "VPN-профиль добавлен" else "Нет добавленных серверов",
                 color = RouteText,
                 fontSize = 21.sp,
                 fontFamily = FontFamily.Serif
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                if (profileImported) "Профиль сохранён локально в зашифрованном виде." else "Импортируй конфигурацию WireGuard (.conf), полученную от своего VPS или VPN-провайдера.",
+                if (profileImported) "Профиль сохранён локально в зашифрованном виде." else "Импортируй WireGuard (.conf) или sing-box JSON с TUN inbound от своего провайдера.",
                 color = RouteMuted,
                 fontSize = 12.sp,
                 lineHeight = 18.sp
@@ -1182,7 +1182,7 @@ private fun ServersScreen(
             ) {
                 Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (profileImported) "Заменить профиль" else "Импортировать WireGuard .conf")
+                Text(if (profileImported) "Заменить профиль" else "Импортировать VPN-профиль")
             }
             if (profileImported) {
                 Spacer(Modifier.height(9.dp))
