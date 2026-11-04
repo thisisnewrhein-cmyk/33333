@@ -95,7 +95,11 @@ class SingBoxEngineAdapter(
 
         if (!runtime.isRunning && !runtime.isStarting && mayBeActive && vpnNetwork == null) {
             RouteScoutVpnRuntime.clearStaleMarker(appContext)
-            return VpnEngineStatus.stopped()
+            return VpnEngineStatus(
+                engineId = id,
+                isRunning = false,
+                isVerified = false
+            )
         }
 
         val isRunning = runtime.isRunning || runtime.isStarting ||
