@@ -193,26 +193,6 @@ class RouteScoutVpnService : VpnService() {
         }
     }
 
-    private fun underlyingNetworkMetered(): Boolean? {
-        val manager = getSystemService(android.net.ConnectivityManager::class.java)
-        val active = manager.activeNetwork
-        val candidates = manager.allNetworks.mapNotNull { network ->
-            val capabilities = manager.getNetworkCapabilities(network) ?: return@mapNotNull null
-            if (!capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN) ||
-                !capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            ) return@mapNotNull null
-            network to capabilities
-        }
-        val selected = candidates.firstOrNull { it.first == active }
-            ?: candidates.firstOrNull {
-                it.second.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            }
-            ?: candidates.firstOrNull()
-        return selected?.second?.let {
-            !it.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-        }
-    }
-
     private suspend fun stopCore(stopSelfAfter: Boolean): Unit = withContext(Dispatchers.IO) {
         monitorJob?.cancelAndJoin()
         monitorJob = null
@@ -259,10 +239,6 @@ class RouteScoutVpnService : VpnService() {
         val builder = Builder()
             .setSession("RouteScout")
             .setMtu(options.mtu)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            underlyingNetworkMetered()?.let(builder::setMetered)
-        }
 
         val ipv4Addresses = options.inet4Address
         while (ipv4Addresses.hasNext()) {
