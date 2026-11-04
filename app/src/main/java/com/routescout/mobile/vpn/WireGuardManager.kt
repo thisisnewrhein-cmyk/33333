@@ -33,8 +33,34 @@ data class WireGuardTunnelSnapshot(
 }
 
 class WireGuardManager(context: Context) {
-    private val backend = GoBackend(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val contextPackageName = appContext.packageName
+    private val backend = GoBackend(appContext)
     private val tunnel = RouteScoutTunnel()
+
+    /**
+     * Validates the profile before the coordinator tears down an existing tunnel.
+     * RouteScout must be included in the VPN route so its HTTPS probe can verify
+     * that packets actually traversed the tunnel.
+     */
+    suspend fun validateConfig(configText: String) = withContext(Dispatchers.IO) {
+        val config = Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
+        val interfaceConfig = config.getInterface()
+        val packageName = contextPackageName
+
+        if (packageName in interfaceConfig.getExcludedApplications()) {
+            throw IllegalArgumentException(
+                "RouteScout исключён из VPN-профиля. Удали приложение из списка исключений, чтобы проверить туннель."
+            )
+        }
+
+        val includedApplications = interfaceConfig.getIncludedApplications()
+        if (includedApplications.isNotEmpty() && packageName !in includedApplications) {
+            throw IllegalArgumentException(
+                "В VPN-профиле разрешены только отдельные приложения, но RouteScout не включён в этот список."
+            )
+        }
+    }
 
     suspend fun connect(configText: String) = withContext(Dispatchers.IO) {
         val config = Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
