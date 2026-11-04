@@ -93,7 +93,8 @@ class OpenVpnProfileSanitizerTest {
         assertTrue(sanitized.contains("<peer-fingerprint>"))
         assertTrue(sanitized.contains("</peer-fingerprint>"))
         assertTrue(sanitized.contains(fingerprint))
-        assertTrue(sanitized.contains("remote-cert-tls server"))
+        // A valid SHA-256 peer pin is itself an accepted identity check.
+        assertFalse(sanitized.contains("remote-cert-tls server"))
     }
 
     @Test
