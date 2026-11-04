@@ -89,6 +89,9 @@ import com.routescout.mobile.ui.theme.RouteSurfaceRaised
 import com.routescout.mobile.ui.theme.RouteText
 import com.routescout.mobile.vpn.SecureConfigStore
 import com.routescout.mobile.vpn.WireGuardManager
+import com.routescout.mobile.vpn.ConnectionCoordinator
+import com.routescout.mobile.vpn.VpnEngineId
+import com.routescout.mobile.vpn.WireGuardEngineAdapter
 import com.routescout.mobile.vpn.FreeVpnServer
 import com.routescout.mobile.vpn.VpnGateRepository
 import com.routescout.mobile.vpn.VpnGateProfileExporter
@@ -104,6 +107,7 @@ import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -126,6 +130,17 @@ fun RouteScoutApp() {
     val scope = rememberCoroutineScope()
     val configStore = remember(context) { SecureConfigStore(context) }
     val wireGuardManager = remember(context) { WireGuardManager(context) }
+    val networkDiagnostics = remember(context) { NetworkDiagnosticsRepository(context) }
+    val latestVpnProbeSnapshot = remember { mutableStateOf<DiagnosticSnapshot?>(null) }
+    val connectionCoordinator = remember(context) {
+        ConnectionCoordinator(
+            listOf(
+                WireGuardEngineAdapter(wireGuardManager) {
+                    latestVpnProbeSnapshot.value = networkDiagnostics.runQuickCheck()
+                }
+            )
+        )
+    }
     val vpnGateRepository = remember { VpnGateRepository() }
     val profileExporter = remember(context) { VpnGateProfileExporter(context) }
     val serverHealthChecker = remember { ServerHealthChecker() }
@@ -156,50 +171,63 @@ fun RouteScoutApp() {
         if (!isVpnBusy) {
             scope.launch {
                 isVpnBusy = true
+                latestVpnProbeSnapshot.value = null
                 try {
                     val configText = withContext(Dispatchers.IO) {
                         configStore.load() ?: error("No WireGuard profile")
                     }
-                    val baselineSnapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
+                    val baselineSnapshot = networkDiagnostics.runQuickCheck()
                     preVpnPublicIp = baselineSnapshot.publicIp
                     snapshot = baselineSnapshot
 
-                    val previousTunnel = wireGuardManager.getSnapshot()
-                    wireGuardManager.connect(configText)
+                    val connectionStatus = connectionCoordinator.connect(
+                        VpnEngineId.WIREGUARD,
+                        configText
+                    )
 
-                    // Generate real traffic through the VPN before checking peer statistics.
-                    snapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
+                    // The adapter's probe both generates tunnel traffic and supplies
+                    // the post-connect diagnostics used for the public-IP comparison.
+                    snapshot = latestVpnProbeSnapshot.value ?: networkDiagnostics.runQuickCheck()
                     vpnIpChanged = when {
                         preVpnPublicIp != null && snapshot.publicIp != null ->
                             preVpnPublicIp != snapshot.publicIp
                         else -> null
                     }
-                    val verifiedTunnel = wireGuardManager.waitForHandshake(previousTunnel)
-                    isVpnTunnelUp = verifiedTunnel.isUp
-                    isVpnConnected =
-                        verifiedTunnel.isUp &&
-                        verifiedTunnel.hasRecentHandshake() &&
-                        verifiedTunnel.hasTrafficEvidenceSince(previousTunnel)
 
+                    isVpnTunnelUp = connectionStatus.isRunning
+                    isVpnConnected = connectionStatus.isConnected
                     vpnMessage = if (isVpnConnected) {
                         when (vpnIpChanged) {
                             true -> "WireGuard handshake подтверждён · внешний IP изменился"
                             false -> "WireGuard handshake подтверждён, но внешний IP не изменился"
                             null -> "WireGuard handshake подтверждён · сравнение IP недоступно"
                         }
-                    } else if (verifiedTunnel.isUp) {
-                        "Туннель запущен, но сервер не подтвердил handshake. Проверь Endpoint, ключи и доступность сервера."
+                    } else if (isVpnTunnelUp) {
+                        connectionStatus.failureReason
+                            ?: "Туннель запущен, но удалённое соединение не подтверждено."
                     } else {
                         "VPN-туннель не запущен. Проверь профиль и разрешение Android VPN."
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (_: Exception) {
-                    isVpnConnected = false
-                    isVpnTunnelUp = try {
-                        wireGuardManager.getSnapshot().isUp
+                    val observedStatus = try {
+                        connectionCoordinator.currentStatus()
                     } catch (_: Exception) {
-                        false
+                        null
                     }
-                    vpnMessage = "Не удалось подключиться. Проверьте профиль и доступность сервера."
+                    // Unknown state is treated as potentially active: do not invite
+                    // the user to start a second VPN while the first may still own TUN.
+                    isVpnConnected = observedStatus?.isConnected ?: false
+                    isVpnTunnelUp = observedStatus?.isRunning ?: true
+                    vpnMessage = when {
+                        observedStatus == null ->
+                            "Не удалось подтвердить состояние VPN. Проверь системный статус перед запуском другого VPN."
+                        observedStatus.isRunning ->
+                            observedStatus.failureReason ?: "Туннель активен, но соединение не подтверждено."
+                        else ->
+                            "Не удалось подключиться. Проверьте профиль и доступность сервера."
+                    }
                 } finally {
                     isVpnBusy = false
                 }
@@ -231,10 +259,12 @@ fun RouteScoutApp() {
             scope.launch {
                 isVpnBusy = true
                 try {
-                    wireGuardManager.disconnect()
+                    connectionCoordinator.disconnect()
                     isVpnConnected = false
                     isVpnTunnelUp = false
                     vpnMessage = "Соединение отключено"
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (_: Exception) {
                     vpnMessage = "Не удалось корректно отключить туннель"
                 } finally {
@@ -286,28 +316,27 @@ fun RouteScoutApp() {
             val savedConfig = withContext(Dispatchers.IO) { configStore.load() }
             profileImported = savedConfig != null
             profileEndpoint = savedConfig?.let { extractEndpoint(it) }
-            val previousTunnel = wireGuardManager.getSnapshot()
-            isVpnTunnelUp = previousTunnel.isUp
-            if (previousTunnel.isUp) {
-                snapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
-                val verifiedTunnel = wireGuardManager.waitForHandshake(previousTunnel)
-                isVpnTunnelUp = verifiedTunnel.isUp
-                isVpnConnected =
-                    verifiedTunnel.isUp &&
-                    verifiedTunnel.hasRecentHandshake() &&
-                    verifiedTunnel.hasTrafficEvidenceSince(previousTunnel)
+            var observedStatus = connectionCoordinator.currentStatus()
+            isVpnTunnelUp = observedStatus.isRunning
+            if (observedStatus.isRunning) {
+                snapshot = networkDiagnostics.runQuickCheck()
+                observedStatus = connectionCoordinator.currentStatus()
+                isVpnTunnelUp = observedStatus.isRunning
+                isVpnConnected = observedStatus.isConnected
             } else {
                 isVpnConnected = false
                 isVpnTunnelUp = false
             }
             vpnMessage = when {
                 isVpnConnected -> "WireGuard handshake подтверждён"
-                previousTunnel.isUp -> "Туннель запущен, но handshake сервера не подтверждён"
+                isVpnTunnelUp -> "Туннель запущен, но handshake сервера не подтверждён"
                 profileImported -> "Профиль готов к подключению"
                 else -> "Сервер не настроен"
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
-            vpnMessage = "Не удалось прочитать сохранённый профиль"
+            vpnMessage = "Не удалось прочитать профиль или подтвердить состояние VPN"
         }
     }
 
