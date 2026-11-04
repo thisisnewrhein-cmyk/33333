@@ -1514,7 +1514,7 @@ private fun SettingsScreen() {
                         context.startActivity(
                             Intent(
                                 Intent.ACTION_VIEW,
-                                Uri.parse("https://github.com/thisisnewrhein-cmyk/33333/blob/codex/routescout-mobile/LICENSE")
+                                Uri.parse("https://github.com/thisisnewrhein-cmyk/33333/blob/codex/routescout-gpl-core/LICENSE")
                             )
                         )
                     }
