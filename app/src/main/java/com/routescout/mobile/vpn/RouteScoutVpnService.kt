@@ -7,7 +7,6 @@ import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.net.IpPrefix
 import java.net.InetAddress
 import android.net.VpnService
 import android.os.Build
@@ -128,7 +127,7 @@ class RouteScoutVpnService : VpnService() {
         super.onDestroy()
     }
 
-    private suspend fun startCore(profile: String) = withContext(Dispatchers.IO) {
+    private suspend fun startCore(profile: String): Unit = withContext(Dispatchers.IO) {
         check(VpnService.prepare(this@RouteScoutVpnService) == null) {
             "Android VPN permission is not granted"
         }
@@ -244,7 +243,7 @@ class RouteScoutVpnService : VpnService() {
                 if (ipv4Routes.hasNext()) {
                     while (ipv4Routes.hasNext()) {
                         val route = ipv4Routes.next()
-                        builder.addRoute(IpPrefix(InetAddress.getByName(route.address()), route.prefix()))
+                        builder.addRoute(android.net.IpPrefix(InetAddress.getByName(route.address()), route.prefix()))
                     }
                 } else {
                     builder.addRoute(InetAddress.getByName("0.0.0.0"), 0)
@@ -254,7 +253,7 @@ class RouteScoutVpnService : VpnService() {
                 if (ipv6Routes.hasNext()) {
                     while (ipv6Routes.hasNext()) {
                         val route = ipv6Routes.next()
-                        builder.addRoute(IpPrefix("\${route.address()}/\${route.prefix()}"))
+                        builder.addRoute(InetAddress.getByName(route.address()), route.prefix())
                     }
                 } else {
                     // Capture IPv6 even if the remote outbound cannot route it: fail closed.
@@ -264,7 +263,7 @@ class RouteScoutVpnService : VpnService() {
                 val ipv4Exclusions = options.inet4RouteExcludeAddress
                 while (ipv4Exclusions.hasNext()) {
                     val route = ipv4Exclusions.next()
-                    builder.excludeRoute(IpPrefix("\${route.address()}/\${route.prefix()}"))
+                    builder.excludeRoute(android.net.IpPrefix(InetAddress.getByName(route.address()), route.prefix()))
                 }
                 val ipv6Exclusions = options.inet6RouteExcludeAddress
                 while (ipv6Exclusions.hasNext()) {
@@ -280,7 +279,7 @@ class RouteScoutVpnService : VpnService() {
                 val ipv6Routes = options.inet6RouteRange
                 while (ipv6Routes.hasNext()) {
                     val route = ipv6Routes.next()
-                    builder.addRoute(route.address(), route.prefix())
+                    builder.addRoute(InetAddress.getByName(route.address()), route.prefix())
                 }
             }
 
