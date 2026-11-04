@@ -162,7 +162,7 @@ class DiagnosticReportExporter(context: Context) {
                     .put("https_latency_ms", site.httpsLatencyMs)
                     .put("http_status", site.httpStatusCode)
                     .put("failure_type", site.failure?.name)
-                    .put("error_class", site.error?.substringAfterLast(": ")?.take(80))
+                    .put("error_class", null)
             )
         }
         root.put("site_checks", sites)
