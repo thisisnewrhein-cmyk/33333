@@ -214,22 +214,31 @@ class NetworkDiagnosticsRepository(context: Context) {
      * This verifies the VPN data path rather than the process default route.
      */
     suspend fun probeHttpsOn(network: Network): Boolean = withContext(Dispatchers.IO) {
-        val connection = try {
-            openConnection("https://example.com/", network) as HttpsURLConnection
-        } catch (_: Exception) {
-            return@withContext false
+        val endpoints = listOf(
+            "https://example.com/",
+            "https://www.cloudflare.com/cdn-cgi/trace",
+            "https://www.google.com/generate_204"
+        )
+        for (endpoint in endpoints) {
+            val connection = try {
+                openConnection(endpoint, network) as HttpsURLConnection
+            } catch (_: Exception) {
+                continue
+            }
+            connection.connectTimeout = 3_500
+            connection.readTimeout = 3_500
+            connection.requestMethod = "GET"
+            connection.useCaches = false
+            val responded = try {
+                connection.responseCode in 100..599
+            } catch (_: Exception) {
+                false
+            } finally {
+                connection.disconnect()
+            }
+            if (responded) return@withContext true
         }
-        connection.connectTimeout = 4_000
-        connection.readTimeout = 4_000
-        connection.requestMethod = "GET"
-        connection.useCaches = false
-        try {
-            connection.responseCode in 200..499
-        } catch (_: Exception) {
-            false
-        } finally {
-            connection.disconnect()
-        }
+        false
     }
 
     private fun openConnection(url: String, network: Network?) =
