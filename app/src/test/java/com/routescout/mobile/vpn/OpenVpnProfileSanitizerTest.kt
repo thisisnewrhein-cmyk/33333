@@ -137,6 +137,17 @@ class OpenVpnProfileSanitizerTest {
     }
 
     @Test
+    fun acceptsNumberedTunDeviceNames() {
+        val sanitized = OpenVpnProfileSanitizer.sanitize(validProfile(device = "tun0"))
+        assertTrue(sanitized.contains("dev tun0"))
+    }
+
+    @Test
+    fun rejectsTapDeviceProfiles() {
+        assertRejected(validProfile(device = "tap0"))
+    }
+
+    @Test
     fun rejectsUnsupportedProxyProfilesInsteadOfSilentlyChangingThem() {
         assertRejected(validProfile(extra = "http-proxy proxy.example 8080"))
     }
