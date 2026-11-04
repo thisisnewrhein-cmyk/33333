@@ -9,8 +9,6 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.Process
 import android.system.OsConstants
-import io.nekohasekai.libbox.AutoRedirectHandler
-import io.nekohasekai.libbox.AutoRedirectSession
 import io.nekohasekai.libbox.BridgeOptions
 import io.nekohasekai.libbox.BridgeSession
 import io.nekohasekai.libbox.ConnectionOwner
@@ -143,9 +141,6 @@ class RouteScoutPlatformInterface(
             val item = LibboxNetworkInterface()
             item.name = name
             item.dnsServer = StringArray(link.dnsServers.mapNotNull { it.hostAddress }.iterator())
-            item.dnsSearchDomain = StringArray(
-                link.domains?.split(' ')?.filter { it.isNotBlank() }.orEmpty().iterator()
-            )
             item.gateway = StringArray(
                 link.routes.filter { it.destination.prefixLength == 0 }
                     .mapNotNull { it.gateway?.hostAddress }.iterator()
@@ -210,13 +205,6 @@ class RouteScoutPlatformInterface(
 
     override fun createBridge(options: BridgeOptions?): BridgeSession =
         throw UnsupportedOperationException("Root bridge is not available")
-
-    override fun usePlatformAutoRedirect(): Boolean = false
-
-    override fun createAutoRedirect(
-        options: ByteArray?,
-        handler: AutoRedirectHandler?
-    ): AutoRedirectSession = throw UnsupportedOperationException("Root auto-redirect is not available")
 
     override fun lookupUser(username: String?): PlatformUser =
         PlatformUser().also {
