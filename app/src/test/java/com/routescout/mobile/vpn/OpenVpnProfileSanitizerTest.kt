@@ -9,11 +9,13 @@ import org.junit.Test
 class OpenVpnProfileSanitizerTest {
 
     @Test
-    fun addsServerCertificatePurposeCheckWhenMissing() {
+    fun addsServerCertificatePurposeCheckWithoutInventingAuthenticationPrompt() {
         val sanitized = OpenVpnProfileSanitizer.sanitize(validProfile())
 
         assertTrue(sanitized.contains("remote-cert-tls server"))
-        assertTrue(sanitized.contains("auth-user-pass"))
+        assertTrue(sanitized.contains("<ca>"))
+        assertTrue(sanitized.contains("</ca>"))
+        assertFalse(sanitized.contains("auth-user-pass"))
     }
 
     @Test
@@ -27,13 +29,7 @@ class OpenVpnProfileSanitizerTest {
 
     @Test
     fun rejectsClientCertificatePurposeForRemotePeer() {
-        var rejected = false
-        try {
-            OpenVpnProfileSanitizer.sanitize(validProfile(extra = "remote-cert-tls client"))
-        } catch (_: IOException) {
-            rejected = true
-        }
-        assertTrue(rejected)
+        assertRejected(validProfile(extra = "remote-cert-tls client"))
     }
 
     @Test
@@ -44,41 +40,119 @@ class OpenVpnProfileSanitizerTest {
 
         assertFalse(sanitized.contains("untrusted.sh"))
         assertFalse(sanitized.contains("management 127.0.0.1"))
-        assertTrue(sanitized.contains("<ca>"))
         assertTrue(sanitized.contains("BEGIN CERTIFICATE"))
     }
 
     @Test
     fun rejectsExternalCertificatePaths() {
-        var rejected = false
-        try {
-            OpenVpnProfileSanitizer.sanitize(
-                """
-                client
-                remote 198.51.100.10 443
-                ca /sdcard/attacker-ca.pem
-                """.trimIndent()
-            )
-        } catch (_: IOException) {
-            rejected = true
-        }
-        assertTrue(rejected)
+        assertRejected(
+            """
+            client
+            remote 198.51.100.10 443
+            ca /sdcard/attacker-ca.pem
+            """.trimIndent()
+        )
     }
 
     @Test
     fun requiresTrustAnchorOrPeerFingerprint() {
-        var rejected = false
-        try {
-            OpenVpnProfileSanitizer.sanitize(
-                """
-                client
-                remote 198.51.100.10 443
+        assertRejected(
+            """
+            client
+            remote 198.51.100.10 443
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun rejectsCaBlockWithoutPemCertificate() {
+        assertRejected(
+            """
+            client
+            remote 198.51.100.10 443
+            <ca>
+            not a certificate
+            </ca>
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun acceptsAndPreservesValidInlineSha256PeerFingerprint() {
+        val fingerprint = "00:".repeat(31) + "00"
+        val sanitized = OpenVpnProfileSanitizer.sanitize(
+            """
+            client
+            remote 198.51.100.10 443
+            <peer-fingerprint>
+            $fingerprint
+            </peer-fingerprint>
+            """.trimIndent()
+        )
+
+        assertTrue(sanitized.contains("<peer-fingerprint>"))
+        assertTrue(sanitized.contains("</peer-fingerprint>"))
+        assertTrue(sanitized.contains(fingerprint))
+        assertTrue(sanitized.contains("remote-cert-tls server"))
+    }
+
+    @Test
+    fun rejectsMalformedPeerFingerprint() {
+        assertRejected(
+            """
+            client
+            remote 198.51.100.10 443
+            peer-fingerprint AA:BB:CC
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun stripsEmbeddedAuthCredentialsButKeepsExplicitPrompt() {
+        val sanitized = OpenVpnProfileSanitizer.sanitize(
+            validProfile(
+                extra = """
+                <auth-user-pass>
+                private-user
+                private-password
+                </auth-user-pass>
                 """.trimIndent()
             )
+        )
+
+        assertTrue(sanitized.contains("auth-user-pass"))
+        assertFalse(sanitized.contains("private-user"))
+        assertFalse(sanitized.contains("private-password"))
+    }
+
+    @Test
+    fun removesLocalAuthFilePathFromExplicitAuthDirective() {
+        val sanitized = OpenVpnProfileSanitizer.sanitize(
+            validProfile(extra = "auth-user-pass /sdcard/credentials.txt")
+        )
+
+        assertTrue(sanitized.contains("auth-user-pass"))
+        assertFalse(sanitized.contains("credentials.txt"))
+    }
+
+    @Test
+    fun rejectsUnsupportedProxyProfilesInsteadOfSilentlyChangingThem() {
+        assertRejected(validProfile(extra = "http-proxy proxy.example 8080"))
+    }
+
+    @Test
+    fun rejectsOversizedProfiles() {
+        assertRejected(validProfile() + "x".repeat(300 * 1024))
+    }
+
+    private fun assertRejected(profile: String) {
+        var rejected = false
+        try {
+            OpenVpnProfileSanitizer.sanitize(profile)
         } catch (_: IOException) {
             rejected = true
         }
-        assertTrue(rejected)
+        assertTrue("Expected profile to be rejected", rejected)
     }
 
     private fun validProfile(extra: String = ""): String =
@@ -89,7 +163,7 @@ class OpenVpnProfileSanitizerTest {
         remote 198.51.100.10 443
         <ca>
         -----BEGIN CERTIFICATE-----
-        TEST-CERTIFICATE-DATA
+        MIIB-test-certificate-payload
         -----END CERTIFICATE-----
         </ca>
         $extra
