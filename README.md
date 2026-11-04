@@ -4,7 +4,7 @@ Android application for network diagnostics, VPN profile management, and intelli
 
 ## Current status
 
-**0.5.0 — foreign-site diagnostics and background catalog refresh**
+**0.6.0 — GPL-3.0 foundation, engine contract, and OpenVPN profile hardening**
 
 Implemented in this branch:
 - Native Android project using Kotlin and Jetpack Compose.
@@ -19,7 +19,9 @@ Implemented in this branch:
 - AUTO preflight of up to five top-ranked candidates, preferring a TCP endpoint that is reachable from the device and falling back to an unverified UDP profile only when needed.
 - Temporary .ovpn profile export through Android FileProvider.
 - OpenVPN profile filtering that removes local script/plugin/management directives and rejects external certificate paths.
-- Unit tests for CSV parsing, server selection, and WireGuard handshake evidence.
+- Unit tests for CSV parsing, server selection, WireGuard handshake evidence, the shared VPN engine contract, connection coordination, and OpenVPN profile sanitization.
+- A shared VPN engine contract and serialized connection coordinator. The coordinator is a tested foundation; the current UI still uses the existing WireGuard connection flow directly.
+- OpenVPN profile hardening: reject external certificate/key paths and profiles without a CA or peer fingerprint; enforce `remote-cert-tls server`; remove local script and management directives.
 - Proton VPN Free setup path using the existing in-app WireGuard backend after the user downloads a configuration from the official account portal.
 - WireGuard peer handshake and received-traffic verification before the UI reports a successful WireGuard connection.
 - Public IPv4/IPv6 lookup using independent ipify and ipapi.co sources, country/ASN metadata, and same-family IP-source comparison.
@@ -30,6 +32,7 @@ Implemented in this branch:
 
 Not implemented yet:
 - An embedded OpenVPN engine. VPN Gate profiles are currently handed off to an installed OpenVPN client; RouteScout does not yet own that OpenVPN tunnel.
+- An embedded sing-box/libbox runtime. The engine contract is ready, but VLESS, VMess, Shadowsocks, Trojan, Hysteria2, TUIC, and other sing-box protocols are not yet available in RouteScout.
 - Automated Proton account authentication/configuration retrieval. Proton's official account portal is used for config generation; RouteScout does not scrape private endpoints or store Proton credentials.
 - Automatic server failover after an OpenVPN tunnel drops or a multi-profile WireGuard failover manager.
 - Automatic switching to a backup server after a failed connection (the current WireGuard flow compares the public IP before and after connection but does not automatically rotate servers).
@@ -51,6 +54,10 @@ RouteScout currently exports a selected OpenVPN profile to an installed OpenVPN 
 
 A foreign public IP requires a real remote VPN server or a VPN provider configuration. This repository does not contain private server infrastructure. Never commit VPN keys, passwords, or production configuration files.
 
+## License
+
+RouteScout's original project code is licensed under GNU GPL-3.0-only. See `LICENSE` and `THIRD_PARTY_NOTICES.md`. The planned sing-box/libbox integration has additional upstream attribution and naming terms; it is not yet bundled in the current APK.
+
 ## Build
 
 Open this repository in Android Studio (JDK 17, Android SDK 36) and run the app configuration.
@@ -69,12 +76,12 @@ The visual language follows the supplied reference image:
 
 ## Next engineering milestones
 
-1. Integrate a maintained OpenVPN engine into RouteScout, subject to compatible licensing and Android lifecycle review.
-2. Integrate and observe an in-app OpenVPN handshake state and tunnel byte counters, subject to compatible licensing.
-3. Verify public IPv4/IPv6, DNS routing, and leaks after a real handshake.
-4. Extend measured server health checks beyond the current top-12 TCP preflight and add automatic failover with bounded retries.
+1. Integrate a pinned, reproducible sing-box/libbox Android runtime behind the shared engine contract.
+2. Implement RouteScout-owned Android `VpnService` lifecycle and verified libbox status/traffic counters.
+3. Integrate an embedded OpenVPN engine and remove the external-client handoff.
+4. Add measured server selection and automatic failover with bounded retries.
 5. Add IPv6/DNS leak verification, jitter, packet-loss sampling, and opt-in throughput tests.
 6. Add country filters, favourites, multi-profile storage, and server history.
-7. Validate on physical Android devices and build a release APK.
+7. Validate on physical Android devices and publish a reproducible GPL-compliant release.
 
 CI note: the workflow uses the runner's preinstalled Android SDK command-line tools.
