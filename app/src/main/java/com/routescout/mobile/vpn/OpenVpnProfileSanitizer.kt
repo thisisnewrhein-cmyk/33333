@@ -203,7 +203,7 @@ internal object OpenVpnProfileSanitizer {
             output.appendLine("auth-user-pass")
         }
 
-        return output.toString().trimEnd() + "\\n"
+        return output.toString().trimEnd() + "\n"
     }
 
     private fun stripInlineComment(value: String): String =
