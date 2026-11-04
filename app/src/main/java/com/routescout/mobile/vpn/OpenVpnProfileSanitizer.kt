@@ -228,14 +228,20 @@ internal object OpenVpnProfileSanitizer {
     }
 
     private fun validateCaCertificates(pem: String) {
+        val certificateBlocks = Regex(
+            "-----BEGIN CERTIFICATE-----[\\\\s\\\\S]*?-----END CERTIFICATE-----"
+        ).findAll(pem).toList()
+        if (certificateBlocks.isEmpty()) {
+            throw IOException("The inline CA block contains no X.509 certificate")
+        }
+
+        val factory = CertificateFactory.getInstance("X.509")
         try {
-            val certificates = CertificateFactory.getInstance("X.509")
-                .generateCertificates(ByteArrayInputStream(pem.toByteArray(Charsets.US_ASCII)))
-            if (certificates.isEmpty()) {
-                throw IOException("The inline CA block contains no X.509 certificate")
+            certificateBlocks.forEach { block ->
+                factory.generateCertificate(
+                    ByteArrayInputStream(block.value.toByteArray(Charsets.US_ASCII))
+                )
             }
-        } catch (error: IOException) {
-            throw error
         } catch (error: Exception) {
             throw IOException("The inline CA block is not a parseable X.509 certificate bundle", error)
         }
