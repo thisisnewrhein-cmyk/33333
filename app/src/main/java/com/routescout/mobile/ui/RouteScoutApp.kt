@@ -172,6 +172,7 @@ fun RouteScoutApp() {
                     val configText = withContext(Dispatchers.IO) {
                         configStore.load() ?: error("No WireGuard profile")
                     }
+                    wireGuardManager.validateConfig(configText)
 
                     // Capture the baseline only after RouteScout has confirmed that
                     // every registered engine released Android's VPN interface.
