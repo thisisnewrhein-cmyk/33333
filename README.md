@@ -4,7 +4,7 @@ Android application for network diagnostics, VPN profile management, and intelli
 
 ## Current status
 
-**0.6.0 — GPL-3.0 foundation, engine contract, and OpenVPN profile hardening**
+**0.6.1 — coordinated WireGuard lifecycle, verified traffic probe, and hardened profile import**
 
 Implemented in this branch:
 - Native Android project using Kotlin and Jetpack Compose.
