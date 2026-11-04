@@ -17,7 +17,7 @@ The application cannot guarantee access through every network restriction. A wor
 
 ## One Android VPN owner
 
-Android exposes VPN operation through `VpnService`. RouteScout must have one coordinator and one active tunnel owner per Android user/profile. Protocol engines must not start competing VPN services. Switching engines is a serialized operation: stop the current engine, confirm it has stopped, then start the next one. If shutdown cannot be confirmed, RouteScout must refuse to start another engine rather than risk two conflicting tunnels.
+Android exposes VPN operation through `VpnService`; Android permits only one active VPN service per user/profile. RouteScout therefore has one serialized connection coordinator even though individual backends may have different service implementations. Switching engines is a serialized operation: request shutdown from every registered engine, query each engine's live state, and start the next only when all report `isRunning=false`. A successful `disconnect()` return alone is not proof that the TUN interface was released. If any engine cannot be queried or still reports a running tunnel, RouteScout refuses to start another engine.
 
 ## Engine contract
 
@@ -28,7 +28,17 @@ The source package `com.routescout.mobile.vpn` defines:
 - `ConnectionCoordinator` — serializes lifecycle changes and rejects unverified connections.
 - `WireGuardEngineAdapter` — adapts the existing WireGuard backend to the common contract.
 
-The current UI still uses the existing WireGuard flow directly. The coordinator is a tested foundation and is not yet the active UI connection path.
+The current UI uses the coordinator for WireGuard connect, disconnect, and status. The registry currently contains WireGuard only; sing-box/libbox and embedded OpenVPN are not yet registered. The WireGuard manager is application-scoped so the same GoBackend and Tunnel object survive Activity recreation.
+
+## WireGuard verification and app routing
+
+The active WireGuard UI path is routed through `ConnectionCoordinator`. A connection is not accepted merely because the backend reports `State.UP`: RouteScout sends a lightweight HTTPS request to `https://example.com/`, then waits for a recent peer handshake and traffic evidence. The coordinator re-reads live engine status after `connect()` returns.
+
+RouteScout validates the imported WireGuard app filters before disconnecting an existing tunnel. If the profile excludes RouteScout, or uses an allow-list that omits RouteScout, the app refuses the attempt because its own traffic probe would bypass the tunnel and could not provide valid verification evidence. The profile is not changed automatically.
+
+The backend and its `Tunnel` instance are process-scoped singletons. This matters because WireGuard Android's `GoBackend` tracks the current tunnel and service owner on the backend instance; creating a second backend object can lose the reference to an already-running tunnel after Activity recreation.
+
+A successful HTTPS probe proves that this app received a remote response through its configured Android route. It does not prove that every app is routed through the VPN, nor does it replace DNS/IPv6 leak testing.
 
 ## Planned libbox integration
 
@@ -49,7 +59,7 @@ The current application does not yet embed libbox and does not yet support VLESS
 
 ## OpenVPN profile safety
 
-VPN Gate profiles are untrusted input. The exporter removes local script and management directives, rejects external certificate/key paths, requires a usable remote endpoint, and requires a CA certificate or peer fingerprint. It also enforces `remote-cert-tls server` so the client checks that the peer certificate is intended for a TLS server.
+VPN Gate profiles are untrusted input. The importer enforces a 256 KiB decoded-profile limit, rejects external certificate/key paths, unsupported HTTP/SOCKS proxy profiles, non-TUN device types, missing client/remote endpoints, and malformed trust material. Inline CA blocks must contain parseable X.509 certificates; SHA-256 peer fingerprints are accepted as an alternative trust check. When CA trust is used without a peer pin, the sanitizer adds `remote-cert-tls server`. The OpenVPN 2.6 manual explicitly treats `peer-fingerprint` as an alternative peer-identity check, so the sanitizer does not add the server-EKU constraint when a valid fingerprint pin is present. Inline usernames/passwords are not exported; an authentication prompt is retained only when the source profile requested it.
 
 RouteScout must not silently enable legacy ciphers such as BF-CBC to make an old relay connect. Any legacy compatibility option must be explicit, explained, and separately security-reviewed.
 
@@ -67,9 +77,10 @@ A failed website probe is not proof of ISP filtering. DNS failure, TLS failure, 
 
 ## Milestones
 
-1. Establish GPL-3.0 licensing, notices, a shared engine contract, and serialized connection lifecycle.
-2. Integrate and verify the pinned libbox runtime inside RouteScout.
-3. Integrate an embedded OpenVPN engine and remove the external-client handoff.
-4. Add measured candidate ranking, bounded automatic failover, and recovery.
-5. Add packet loss, jitter, throughput, DNS/IPv6 leak checks, and a local session-history dashboard.
-6. Validate on physical Android devices and publish a reproducible release.
+1. Complete the current 0.6.1 audit fixes and obtain a clean CI run on the final branch head.
+2. Integrate the pinned libbox 1.14.4 runtime with checksum verification and the exact matching platform-interface API.
+3. Implement the libbox Android service lifecycle and a real TUN/traffic verification path before registering it with the coordinator.
+4. Integrate an embedded OpenVPN engine only after its license, native ABI, and lifecycle compatibility are verified.
+5. Add measured candidate ranking, bounded failover, and recovery; never switch on TCP preflight alone.
+6. Add DNS/IPv6 leak verification, jitter, packet-loss sampling, and opt-in throughput tests.
+7. Validate on physical Android devices and publish a reproducible GPL-compliant release.
