@@ -193,19 +193,40 @@ class RouteScoutVpnService : VpnService() {
         }
     }
 
-    private suspend fun stopCore(stopSelfAfter: Boolean) = withContext(Dispatchers.IO) {
+    private suspend fun stopCore(stopSelfAfter: Boolean): Unit = withContext(Dispatchers.IO) {
         monitorJob?.cancelAndJoin()
         monitorJob = null
 
+        var shutdownVerified = true
         val descriptor = tunDescriptor
-        tunDescriptor = null
-        runCatching { descriptor?.close() }
+        if (descriptor != null) {
+            if (runCatching { descriptor.close() }.isSuccess) {
+                tunDescriptor = null
+            } else {
+                shutdownVerified = false
+            }
+        }
 
         val server = commandServer
-        commandServer = null
         if (server != null) {
-            runCatching { server.closeService() }
-            runCatching { server.close() }
+            val serviceClosed = runCatching { server.closeService() }.isSuccess
+            val serverClosed = runCatching { server.close() }.isSuccess
+            if (serviceClosed && serverClosed) {
+                commandServer = null
+            } else {
+                shutdownVerified = false
+            }
+        }
+
+        if (!shutdownVerified) {
+            RouteScoutVpnRuntime.markStopUnverified(
+                this@RouteScoutVpnService,
+                "LIBBOX_STOP_UNVERIFIED"
+            )
+            updateForegroundNotification("Не удалось подтвердить отключение VPN · проверь систему")
+            // Keep the service alive and the VPN owner reserved. The coordinator
+            // must not start WireGuard or another engine while shutdown is uncertain.
+            return@withContext
         }
 
         RouteScoutVpnRuntime.markStopped(this@RouteScoutVpnService)
