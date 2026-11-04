@@ -27,7 +27,7 @@ object SingBoxConfigValidator {
         "anytls" to VpnProtocol.ANYTLS
     )
 
-    fun validateAndNormalize(profile: String): SingBoxProfileSummary {
+    fun validateAndNormalize(profile: String, routeScoutPackageName: String? = null): SingBoxProfileSummary {
         require(profile.isNotBlank()) { "Файл профиля пустой" }
         val root = try {
             JSONObject(profile)
@@ -122,6 +122,21 @@ object SingBoxConfigValidator {
                 excludePackages == null || excludePackages.length() == 0
         ) {
             "Android не позволяет одновременно включить allowlist и blocklist приложений в одном VPN-профиле"
+        }
+        if (!routeScoutPackageName.isNullOrBlank()) {
+            val excludesRouteScout = excludePackages != null &&
+                (0 until excludePackages.length()).any {
+                    excludePackages.optString(it) == routeScoutPackageName
+                }
+            require(!excludesRouteScout) {
+                "Нельзя исключить само приложение RouteScout: оно выполняет проверку VPN-туннеля"
+            }
+            if (includePackages != null && includePackages.length() > 0) {
+                val alreadyIncluded = (0 until includePackages.length()).any {
+                    includePackages.optString(it) == routeScoutPackageName
+                }
+                if (!alreadyIncluded) includePackages.put(routeScoutPackageName)
+            }
         }
 
         tun.put("auto_route", true)
