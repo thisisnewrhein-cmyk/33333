@@ -32,7 +32,16 @@ data class WireGuardTunnelSnapshot(
     }
 }
 
-class WireGuardManager(context: Context) {
+class WireGuardManager private constructor(context: Context) {
+    companion object {
+        @Volatile
+        private var instance: WireGuardManager? = null
+
+        fun getInstance(context: Context): WireGuardManager =
+            instance ?: synchronized(this) {
+                instance ?: WireGuardManager(context.applicationContext).also { instance = it }
+            }
+    }
     private val appContext = context.applicationContext
     private val contextPackageName = appContext.packageName
     private val backend = GoBackend(appContext)
