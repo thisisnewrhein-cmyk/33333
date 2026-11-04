@@ -119,7 +119,11 @@ class RouteScoutVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        runBlocking(Dispatchers.IO) { stopCore(stopSelfAfter = false) }
+        // Do not overwrite a startup failure state after the failed start path has
+        // already released the native service and persisted its failure code.
+        if (commandServer != null || tunDescriptor != null || monitorJob != null) {
+            runBlocking(Dispatchers.IO) { stopCore(stopSelfAfter = false) }
+        }
         serviceScope.cancel()
         super.onDestroy()
     }
