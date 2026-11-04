@@ -156,10 +156,10 @@ class OpenVpnProfileSanitizerTest {
         assertTrue("Expected profile to be rejected", rejected)
     }
 
-    private fun validProfile(extra: String = ""): String =
+    private fun validProfile(extra: String = "", device: String = "tun"): String =
         """
         client
-        dev tun
+        dev $device
         proto tcp-client
         remote 198.51.100.10 443
         <ca>
