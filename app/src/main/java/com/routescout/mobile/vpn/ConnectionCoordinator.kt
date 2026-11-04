@@ -7,8 +7,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * Serializes tunnel lifecycle changes so RouteScout never intentionally starts
- * one engine while another registered engine may still own Android's VPN slot.
+ * Serializes tunnel lifecycle changes across all registered engines.
+ * A successful disconnect() call is not proof that Android's VPN interface
+ * has been released; every engine must also report isRunning=false.
  */
 class ConnectionCoordinator(engines: Collection<VpnEngine>) {
     private val enginesById: Map<VpnEngineId, VpnEngine> =
@@ -17,75 +18,116 @@ class ConnectionCoordinator(engines: Collection<VpnEngine>) {
         }
 
     private val mutex = Mutex()
-    private var activeEngine: VpnEngine? = null
 
     suspend fun connect(engineId: VpnEngineId, profile: String): VpnEngineStatus = mutex.withLock {
         require(profile.isNotBlank()) { "VPN profile must not be empty" }
-
         val engine = enginesById[engineId]
             ?: throw IllegalArgumentException("VPN engine is not registered: $engineId")
 
-        // If any engine cannot confirm shutdown, fail closed and do not start another.
-        disconnectAllLocked()
+        // Inspect all engines to catch tunnels left behind by service/process interruptions.
+        disconnectAllAndVerifyLocked()
 
         try {
-            val result = engine.connect(profile)
-            if (result.engineId != engineId) {
+            engine.connect(profile)
+
+            // Re-read live state; do not trust a possibly stale connect() result.
+            val observed = engine.status()
+            if (observed.engineId != null && observed.engineId != engineId) {
                 throw IllegalStateException("VPN engine returned a status for a different engine")
             }
-            if (!result.isConnected) {
-                throw EngineConnectionException(result)
-            }
-
-            activeEngine = engine
-            result
+            if (!observed.isConnected) throw EngineConnectionException(observed)
+            observed
         } catch (cancelled: CancellationException) {
-            activeEngine = null
             withContext(NonCancellable) {
-                runCatching { engine.disconnect() }
+                runCatching { disconnectAndVerify(engine) }
+                    .exceptionOrNull()
+                    ?.let(cancelled::addSuppressed)
             }
             throw cancelled
         } catch (error: Exception) {
-            activeEngine = null
-            try {
-                engine.disconnect()
-            } catch (cleanupError: Exception) {
-                error.addSuppressed(cleanupError)
-            }
+            runCatching { disconnectAndVerify(engine) }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
             throw error
         }
     }
 
     suspend fun disconnect() = mutex.withLock {
-        disconnectAllLocked()
+        disconnectAllAndVerifyLocked()
     }
 
+    /**
+     * Reports live state for every engine. Query failures propagate instead of
+     * being misreported as a stopped tunnel.
+     */
     suspend fun currentStatus(): VpnEngineStatus = mutex.withLock {
-        activeEngine?.status() ?: VpnEngineStatus.stopped()
+        val observed = enginesById.map { (id, engine) ->
+            val status = engine.status()
+            if (status.engineId != null && status.engineId != id) {
+                throw IllegalStateException("VPN engine returned a status for a different engine")
+            }
+            status
+        }
+
+        val running = observed.filter { it.isRunning }
+        when (running.size) {
+            0 -> VpnEngineStatus.stopped()
+            1 -> running.single()
+            else -> throw IllegalStateException(
+                "Multiple VPN engines report an active tunnel; connection state is unsafe"
+            )
+        }
     }
 
-    private suspend fun disconnectAllLocked() {
+    private suspend fun disconnectAllAndVerifyLocked() {
         val failures = mutableListOf<Exception>()
 
-        for (engine in enginesById.values) {
+        for ((id, engine) in enginesById) {
             try {
-                engine.disconnect()
+                disconnectAndVerify(engine)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                failures += error
+                failures += IllegalStateException("Could not confirm $id shutdown", error)
             }
         }
 
         if (failures.isNotEmpty()) {
             val failure = IllegalStateException(
-                "Could not confirm shutdown of every VPN engine; refusing to start another tunnel"
+                "At least one VPN engine may still own Android's VPN interface; refusing to start another tunnel"
             )
             failures.forEach(failure::addSuppressed)
             throw failure
         }
+    }
 
-        activeEngine = null
+    private suspend fun disconnectAndVerify(engine: VpnEngine) {
+        var disconnectFailure: Exception? = null
+
+        try {
+            engine.disconnect()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            disconnectFailure = error
+        }
+
+        val observed = try {
+            engine.status()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (statusFailure: Exception) {
+            disconnectFailure?.let(statusFailure::addSuppressed)
+            throw IllegalStateException("Unable to verify VPN engine shutdown", statusFailure)
+        }
+
+        if (observed.isRunning) {
+            val failure = IllegalStateException(
+                "VPN engine still reports an active tunnel after disconnect()"
+            )
+            disconnectFailure?.let(failure::addSuppressed)
+            throw failure
+        }
     }
 }
 
