@@ -128,6 +128,88 @@ class NetworkDiagnosticsRepository(context: Context) {
 
 
     /**
+     * Full on-device diagnostic run. The optional Network parameter binds every
+     * request to the VPN interface when the caller is validating an active tunnel.
+     */
+    suspend fun runFullCheck(network: Network? = null): FullDiagnosticSnapshot = withContext(Dispatchers.IO) {
+        val quick = runQuickCheck(network)
+        val connectivity = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val inspectedNetwork = network ?: connectivity.activeNetwork
+        val capabilities = inspectedNetwork?.let(connectivity::getNetworkCapabilities)
+        val linkProperties = inspectedNetwork?.let(connectivity::getLinkProperties)
+
+        val samples = coroutineScope {
+            (1..5).map { attempt ->
+                async { probeHttpsSample(network, attempt) }
+            }.awaitAll()
+        }
+        val failureRate = DiagnosticAnalyzer.failureRate(samples)
+        val vpnActive = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+
+        FullDiagnosticSnapshot(
+            quick = quick,
+            networkType = when {
+                capabilities == null -> null
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "WIFI"
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "CELLULAR"
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ETHERNET"
+                else -> "OTHER"
+            },
+            networkValidated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            networkMetered = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)?.not(),
+            captivePortal = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+            vpnTransportActive = vpnActive,
+            dnsServers = linkProperties?.dnsServers?.mapNotNull { it.hostAddress }.orEmpty(),
+            httpsSamples = samples,
+            httpsFailureRatePercent = failureRate,
+            httpsLatencyVariationMs = DiagnosticAnalyzer.latencyVariation(samples),
+            findings = DiagnosticAnalyzer.findings(quick, vpnActive, failureRate),
+            checkedAtEpochMillis = System.currentTimeMillis()
+        )
+    }
+
+    private suspend fun probeHttpsSample(network: Network?, attempt: Int): HttpsProbeSample =
+        withContext(Dispatchers.IO) {
+            val startedAt = SystemClock.elapsedRealtime()
+            val connection = try {
+                openConnection("https://example.com/", network) as HttpsURLConnection
+            } catch (error: Exception) {
+                return@withContext HttpsProbeSample(
+                    target = "example.com",
+                    attempt = attempt,
+                    latencyMs = null,
+                    failureClass = error.javaClass.simpleName
+                )
+            }
+            connection.connectTimeout = 4_000
+            connection.readTimeout = 4_000
+            connection.requestMethod = "GET"
+            connection.useCaches = false
+            try {
+                val status = connection.responseCode
+                if (status in 100..599) {
+                    HttpsProbeSample(
+                        target = "example.com",
+                        attempt = attempt,
+                        latencyMs = SystemClock.elapsedRealtime() - startedAt
+                    )
+                } else {
+                    HttpsProbeSample("example.com", attempt, null, "HTTP_STATUS")
+                }
+            } catch (error: Exception) {
+                HttpsProbeSample(
+                    target = "example.com",
+                    attempt = attempt,
+                    latencyMs = null,
+                    failureClass = error.javaClass.simpleName
+                )
+            } finally {
+                connection.disconnect()
+            }
+        }
+
+    /**
      * Small explicit probe bound to the supplied Android VPN Network.
      * This verifies the VPN data path rather than the process default route.
      */
