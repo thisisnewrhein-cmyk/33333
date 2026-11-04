@@ -34,6 +34,8 @@ The current UI still uses the existing WireGuard flow directly. The coordinator 
 
 The planned multi-protocol runtime is the upstream Android libbox library from the sing-box project. The upstream project is GPL-3.0-or-later and includes an additional section 7 term restricting use of its application name and implied affiliation. RouteScout will retain the required notices and will not use upstream branding or imply endorsement.
 
+As checked on 2026-11-04, the current libbox release candidate is **1.14.4** (published 2026-10-25). Its published AAR SHA-256 is `d2685924a657705beda44e94c6dc499e781df1ad20d65474e3591ec2f8b96465`. This is a planning pin only; the dependency is not yet added to the app and the artifact must be re-verified during integration.
+
 Integration is intentionally a separate milestone. It requires:
 
 - pinning an exact upstream libbox release and recording its source commit and artifact checksum;
