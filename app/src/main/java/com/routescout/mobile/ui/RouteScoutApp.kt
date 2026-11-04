@@ -206,7 +206,10 @@ fun RouteScoutApp() {
                         false -> "WireGuard handshake подтверждён, но внешний IP не изменился"
                         null -> "WireGuard handshake подтверждён · сравнение IP недоступно"
                     }
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    val profileValidationMessage = error.message?.takeIf {
+                        it.startsWith("RouteScout") || it.startsWith("В VPN-профиле")
+                    }
                     val observedStatus = runCatching {
                         connectionCoordinator.currentStatus()
                     }.getOrNull()
@@ -215,7 +218,7 @@ fun RouteScoutApp() {
                     // active" state rather than claiming that the VPN interface is free.
                     isVpnTunnelUp = observedStatus?.isRunning ?: true
                     isVpnConnected = observedStatus?.isConnected ?: false
-                    vpnMessage = when {
+                    vpnMessage = profileValidationMessage ?: when {
                         observedStatus == null ->
                             "Не удалось подтвердить состояние VPN. Проверь системный статус перед запуском другого VPN."
                         observedStatus.isConnected ->
