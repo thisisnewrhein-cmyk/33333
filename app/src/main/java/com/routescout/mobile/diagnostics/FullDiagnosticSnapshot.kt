@@ -96,16 +96,26 @@ object DiagnosticAnalyzer {
                 "Некоторые повторные HTTPS-проверки завершились ошибкой или тайм-аутом. Это не ICMP packet loss."
             )
         }
+        if (result.none { it.severity == "ERROR" || it.severity == "WARNING" }) {
+            if (quick.internetAvailable == true &&
+                quick.dnsLatencyMs != null &&
+                quick.httpsLatencyMs != null
+            ) {
+                result += DiagnosticFinding(
+                    "BASIC_CONNECTIVITY_OK", "INFO", "HIGH",
+                    "Базовые DNS и HTTPS проверки завершились успешно."
+                )
+            } else {
+                result += DiagnosticFinding(
+                    "INSUFFICIENT_BASELINE_DATA", "INFO", "LOW",
+                    "Недостаточно данных для общего вывода о базовой связности."
+                )
+            }
+        }
         result += DiagnosticFinding(
             "DNS_LEAK_NOT_FULLY_PROVEN", "INFO", "HIGH",
             "Список DNS-серверов Android сам по себе не доказывает отсутствие DNS-утечки. Для окончательного вывода нужен внешний DNS leak test."
         )
-        if (result.isEmpty()) {
-            result += DiagnosticFinding(
-                "BASIC_CONNECTIVITY_OK", "INFO", "HIGH",
-                "Базовые DNS и HTTPS проверки завершились успешно."
-            )
-        }
         return result
     }
 }
