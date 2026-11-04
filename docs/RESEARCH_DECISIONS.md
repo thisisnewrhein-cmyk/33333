@@ -62,7 +62,7 @@ The validator rejects proxy-only configurations, unsupported final outbounds, an
 - DNS hijacking;
 - automatic underlying-interface detection to prevent tunnel loops.
 
-It also rejects route exclusions that cover all IPv4 or all IPv6 and rejects simultaneous app allowlist and blocklist settings because Android's VPN builder cannot apply both in one session.
+It also rejects route exclusions that cover all IPv4 or all IPv6, unconditional direct route rules, and simultaneous app allowlist/blocklist settings because Android's VPN builder cannot apply both in one session. If a sing-box allowlist is used, RouteScout adds its own package so its VPN-bound HTTPS verification can run; an explicit exclusion of RouteScout is rejected.
 
 The normalizer intentionally enforces RouteScout's full-device default. Users should be told that imported route behaviour can be changed. It does not make a claim that every imported rule set is safe or leak-free.
 

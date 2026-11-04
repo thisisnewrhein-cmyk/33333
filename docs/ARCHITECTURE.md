@@ -83,7 +83,7 @@ The profile normalizer then:
 - preserves profile route exclusions, but rejects exclusions that cover all IPv4 or all IPv6;
 - rejects simultaneous Android app allowlist and blocklist configuration because Android's VPN builder does not support both in one session.
 
-The normalizer may change imported route behaviour to enforce RouteScout's full-device default. The app does not silently claim that an arbitrary proxy-only config is a system VPN.
+The normalizer may change imported route behaviour to enforce RouteScout's full-device default. It rejects unconditional direct route rules, adds the RouteScout package to an imported app allowlist so its VPN-bound HTTPS probes can run, and rejects a profile that explicitly excludes RouteScout. The app does not silently claim that an arbitrary proxy-only config is a system VPN.
 
 ### Embedded protocols
 

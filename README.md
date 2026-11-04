@@ -16,7 +16,7 @@ Implemented in this branch:
 - Pinned sing-box/libbox 1.14.4 Android AAR dependency through JitPack.
 - A dedicated \`RouteScoutVpnService\` and Android \`PlatformInterface\` for sing-box profiles. The service owns its TUN descriptor, protects upstream sockets, monitors the underlying non-VPN network, and keeps the foreground-service notification updated.
 - Encrypted sing-box JSON profile storage using a separate Android Keystore AES-GCM key.
-- sing-box JSON import validation. RouteScout requires a TUN inbound and supported proxy final outbound; it normalizes full IPv4/IPv6 routes, DNS hijacking, and automatic underlying-interface detection, and rejects direct final routes.
+- sing-box JSON import validation. RouteScout requires a TUN inbound and supported proxy final outbound; it normalizes full IPv4/IPv6 routes, DNS hijacking, and automatic underlying-interface detection, rejects direct final routes and unconditional direct route rules, and keeps RouteScout itself inside an imported app allowlist so the VPN data path can be verified.
 - Embedded sing-box transports exposed by imported profiles: Shadowsocks, VMess, VLESS, Trojan, Hysteria2, TUIC, and AnyTLS. Imported sing-box selector/urltest groups can provide upstream-managed server selection and health testing.
 - Existing WireGuard profiles continue to use the WireGuard Android GoBackend. The coordinator switches between the two service backends sequentially; both are not intentionally run together.
 - Android per-app allowlist/blocklist settings supplied by a sing-box TUN profile are applied through the Android VPN builder. A profile that supplies both lists is rejected because Android's VPN builder does not allow both modes simultaneously.
