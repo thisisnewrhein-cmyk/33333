@@ -106,8 +106,16 @@ object SingBoxConfigValidator {
                     ?: outboundTag.lowercase()
                 if (outboundType == "direct") {
                     val hasScope = routeRuleScopeKeys.any { key ->
-                        rule.has(key) && rule.opt(key) != JSONObject.NULL &&
-                            rule.opt(key).toString().isNotBlank()
+                        if (!rule.has(key)) {
+                            false
+                        } else {
+                            when (val value = rule.opt(key)) {
+                                null, JSONObject.NULL -> false
+                                is JSONArray -> value.length() > 0
+                                is String -> value.isNotBlank()
+                                else -> true
+                            }
+                        }
                     }
                     require(hasScope) {
                         "Безусловное правило direct обходит VPN-маршрут"
