@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.VpnService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -88,6 +89,9 @@ import com.routescout.mobile.ui.theme.RoutePurple
 import com.routescout.mobile.ui.theme.RouteSurfaceRaised
 import com.routescout.mobile.ui.theme.RouteText
 import com.routescout.mobile.vpn.SecureConfigStore
+import com.routescout.mobile.vpn.SecureSingBoxConfigStore
+import com.routescout.mobile.vpn.SingBoxConfigValidator
+import com.routescout.mobile.vpn.SingBoxEngineAdapter
 import com.routescout.mobile.vpn.WireGuardManager
 import com.routescout.mobile.vpn.ConnectionCoordinator
 import com.routescout.mobile.vpn.VpnEngineId
@@ -129,6 +133,7 @@ fun RouteScoutApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val configStore = remember(context) { SecureConfigStore(context) }
+    val singBoxConfigStore = remember(context) { SecureSingBoxConfigStore(context) }
     val wireGuardManager = remember(context) { WireGuardManager(context) }
     val networkDiagnostics = remember(context) { NetworkDiagnosticsRepository(context) }
     val latestVpnProbeSnapshot = remember { mutableStateOf<DiagnosticSnapshot?>(null) }
@@ -139,7 +144,8 @@ fun RouteScoutApp() {
                     val probe = networkDiagnostics.runQuickCheck()
                     latestVpnProbeSnapshot.value = probe
                     probe.httpsLatencyMs != null || probe.siteChecks.any { it.isReachable }
-                }
+                },
+                SingBoxEngineAdapter(context, singBoxConfigStore, networkDiagnostics)
             )
         )
     }
@@ -164,6 +170,7 @@ fun RouteScoutApp() {
     var isChecking by remember { mutableStateOf(false) }
     var profileImported by remember { mutableStateOf(false) }
     var profileEndpoint by remember { mutableStateOf<String?>(null) }
+    var activeProfileEngine by remember { mutableStateOf(VpnEngineId.WIREGUARD) }
     var isVpnConnected by remember { mutableStateOf(false) }
     var isVpnTunnelUp by remember { mutableStateOf(false) }
     var isVpnBusy by remember { mutableStateOf(false) }
@@ -175,15 +182,20 @@ fun RouteScoutApp() {
                 isVpnBusy = true
                 latestVpnProbeSnapshot.value = null
                 try {
+                    val engineId = activeProfileEngine
                     val configText = withContext(Dispatchers.IO) {
-                        configStore.load() ?: error("No WireGuard profile")
+                        when (engineId) {
+                            VpnEngineId.WIREGUARD -> configStore.load()
+                            VpnEngineId.SING_BOX -> singBoxConfigStore.load()
+                            VpnEngineId.OPENVPN -> null
+                        } ?: error("No profile for selected VPN engine")
                     }
                     val baselineSnapshot = networkDiagnostics.runQuickCheck()
                     preVpnPublicIp = baselineSnapshot.publicIp
                     snapshot = baselineSnapshot
 
                     val connectionStatus = connectionCoordinator.connect(
-                        VpnEngineId.WIREGUARD,
+                        engineId,
                         configText
                     )
 
@@ -199,10 +211,14 @@ fun RouteScoutApp() {
                     isVpnTunnelUp = connectionStatus.isRunning
                     isVpnConnected = connectionStatus.isConnected
                     vpnMessage = if (isVpnConnected) {
-                        when (vpnIpChanged) {
-                            true -> "WireGuard handshake подтверждён · внешний IP изменился"
-                            false -> "WireGuard handshake подтверждён, но внешний IP не изменился"
-                            null -> "WireGuard handshake подтверждён · сравнение IP недоступно"
+                        if (engineId == VpnEngineId.SING_BOX) {
+                            "sing-box · HTTPS через системный VPN-туннель подтверждён"
+                        } else {
+                            when (vpnIpChanged) {
+                                true -> "WireGuard handshake подтверждён · внешний IP изменился"
+                                false -> "WireGuard handshake подтверждён, но внешний IP не изменился"
+                                null -> "WireGuard handshake подтверждён · сравнение IP недоступно"
+                            }
                         }
                     } else if (isVpnTunnelUp) {
                         connectionStatus.failureReason
@@ -248,7 +264,7 @@ fun RouteScoutApp() {
     }
 
     val requestConnect: () -> Unit = {
-        val permissionIntent = GoBackend.VpnService.prepare(context)
+        val permissionIntent = VpnService.prepare(context)
         if (permissionIntent != null) {
             vpnPermissionLauncher.launch(permissionIntent)
         } else {
@@ -287,13 +303,28 @@ fun RouteScoutApp() {
                             input.readBytes().toString(Charsets.UTF_8)
                         } ?: error("Cannot read selected file")
                     }
-                    withContext(Dispatchers.IO) {
-                        Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
-                        configStore.save(configText)
+                    if (configText.trimStart().startsWith("{")) {
+                        val profile = SingBoxConfigValidator.validateAndNormalize(configText)
+                        withContext(Dispatchers.IO) {
+                            singBoxConfigStore.save(profile.normalizedJson)
+                        }
+                        activeProfileEngine = VpnEngineId.SING_BOX
+                        context.getSharedPreferences("routescout_profiles", android.content.Context.MODE_PRIVATE)
+                            .edit().putString("active_profile_engine", VpnEngineId.SING_BOX.name).apply()
+                        profileEndpoint = profile.primaryEndpoint
+                        vpnMessage = "Профиль sing-box сохранён в защищённом хранилище"
+                    } else {
+                        withContext(Dispatchers.IO) {
+                            Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
+                            configStore.save(configText)
+                        }
+                        activeProfileEngine = VpnEngineId.WIREGUARD
+                        context.getSharedPreferences("routescout_profiles", android.content.Context.MODE_PRIVATE)
+                            .edit().putString("active_profile_engine", VpnEngineId.WIREGUARD.name).apply()
+                        profileEndpoint = extractEndpoint(configText)
+                        vpnMessage = "Профиль WireGuard сохранён в защищённом хранилище"
                     }
                     profileImported = true
-                    profileEndpoint = extractEndpoint(configText)
-                    vpnMessage = "Профиль WireGuard сохранён в защищённом хранилище"
                 } catch (_: Exception) {
                     vpnMessage = "Не удалось импортировать файл. Нужен корректный WireGuard .conf"
                 }
@@ -315,9 +346,32 @@ fun RouteScoutApp() {
                     .format(Date(cachedCatalog.updatedAtMs))
             }
 
-            val savedConfig = withContext(Dispatchers.IO) { configStore.load() }
-            profileImported = savedConfig != null
-            profileEndpoint = savedConfig?.let { extractEndpoint(it) }
+            val savedProfiles = withContext(Dispatchers.IO) {
+                configStore.load() to singBoxConfigStore.load()
+            }
+            val savedConfig = savedProfiles.first
+            val savedSingBoxConfig = savedProfiles.second
+            val preferences = context.getSharedPreferences(
+                "routescout_profiles",
+                android.content.Context.MODE_PRIVATE
+            )
+            activeProfileEngine = when (preferences.getString("active_profile_engine", null)) {
+                VpnEngineId.SING_BOX.name -> VpnEngineId.SING_BOX
+                VpnEngineId.WIREGUARD.name -> VpnEngineId.WIREGUARD
+                else -> if (savedSingBoxConfig != null && savedConfig == null) {
+                    VpnEngineId.SING_BOX
+                } else {
+                    VpnEngineId.WIREGUARD
+                }
+            }
+            profileImported = savedConfig != null || savedSingBoxConfig != null
+            profileEndpoint = when (activeProfileEngine) {
+                VpnEngineId.WIREGUARD -> savedConfig?.let { extractEndpoint(it) }
+                VpnEngineId.SING_BOX -> savedSingBoxConfig?.let {
+                    SingBoxConfigValidator.validateAndNormalize(it).primaryEndpoint
+                }
+                VpnEngineId.OPENVPN -> null
+            }
             var observedStatus = connectionCoordinator.currentStatus()
             isVpnTunnelUp = observedStatus.isRunning
             if (observedStatus.isRunning) {
@@ -330,8 +384,10 @@ fun RouteScoutApp() {
                 isVpnTunnelUp = false
             }
             vpnMessage = when {
+                isVpnConnected && observedStatus.engineId == VpnEngineId.SING_BOX ->
+                    "sing-box · HTTPS через системный VPN-туннель подтверждён"
                 isVpnConnected -> "WireGuard handshake подтверждён"
-                isVpnTunnelUp -> "Туннель запущен, но handshake сервера не подтверждён"
+                isVpnTunnelUp -> "Туннель запущен, но удалённое соединение не подтверждено"
                 profileImported -> "Профиль готов к подключению"
                 else -> "Сервер не настроен"
             }
@@ -499,7 +555,7 @@ fun RouteScoutApp() {
         if (!isChecking) {
             scope.launch {
                 isChecking = true
-                snapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
+                snapshot = networkDiagnostics.runQuickCheck()
                 isChecking = false
             }
         }
@@ -565,10 +621,14 @@ fun RouteScoutApp() {
                         onDisconnect = disconnectTunnel,
                         onDeleteProfile = {
                             scope.launch {
-                                withContext(Dispatchers.IO) { configStore.delete() }
+                                withContext(Dispatchers.IO) {
+                                    configStore.delete()
+                                    singBoxConfigStore.delete()
+                                }
                                 profileImported = false
                                 profileEndpoint = null
-                                vpnMessage = "Профиль удалён"
+                                activeProfileEngine = VpnEngineId.WIREGUARD
+                                vpnMessage = "Профили удалены"
                             }
                         }
                     )
