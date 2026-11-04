@@ -27,7 +27,7 @@ Implemented in this branch:
 - Before/after public-IP comparison around an in-app WireGuard connection; the UI reports a changed IP only when two successful lookups differ.
 - WorkManager background refresh of the VPN Gate catalog, with a 15-minute periodic request subject to Android battery and network scheduling.
 - A shared VPN engine contract and serialized connection coordinator; the active WireGuard UI flow now uses the coordinator for connect, disconnect, and live status.
-- A WireGuard engine adapter that requires a recent peer handshake and received-traffic evidence; unit tests cover engine switching, shutdown verification, unverified tunnels, and multiple active engines.
+- A WireGuard engine adapter that requires a successful HTTPS response through the tunnel, a recent peer handshake, and an increase in received bytes; unit tests cover engine switching, shutdown verification, unverified tunnels, and multiple active engines.
 - Local catalog cache containing up to 120 public profiles and recent TCP preflight results; the background worker rechecks up to 12 top-ranked candidates per refresh.
 
 Not implemented yet:

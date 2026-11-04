@@ -55,7 +55,7 @@ The package com.routescout.mobile.vpn contains:
 - VpnEngine: engine identity, supported protocols, connect, disconnect and live status.
 - VpnEngineStatus: separates local tunnel state (isRunning) from verified remote connectivity (isVerified).
 - ConnectionCoordinator: serializes all engine transitions and re-reads live status before accepting a connection.
-- WireGuardEngineAdapter: adapts the existing WireGuard backend and requires a recent peer handshake plus traffic evidence.
+- WireGuardEngineAdapter: adapts the existing WireGuard backend and requires a successful HTTPS probe through the tunnel, a recent peer handshake, and an increase in received bytes. A handshake alone is not proof of payload connectivity.
 
 Only WireGuard is registered in the current UI. SING_BOX and OPENVPN are planned engine identifiers, not claims of implemented support.
 
