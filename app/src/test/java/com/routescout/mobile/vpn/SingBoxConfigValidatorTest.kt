@@ -58,6 +58,21 @@ class SingBoxConfigValidatorTest {
     }
 
     @Test
+    fun rejectsUnconditionalDirectRouteRule() {
+        val profile = validProfile.replace(
+            "\"route\": {",
+            "\"route\": { \"rules\": [{\"outbound\": \"direct\"}],"
+        )
+        var rejected = false
+        try {
+            SingBoxConfigValidator.validateAndNormalize(profile)
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
+    }
+
+    @Test
     fun rejectsDirectFinalOutbound() {
         val profile = validProfile.replace("\"final\": \"proxy\"", "\"final\": \"direct\"")
         var rejected = false
