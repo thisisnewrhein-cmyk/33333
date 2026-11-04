@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 package com.routescout.mobile.vpn
 
 import org.junit.Assert.assertFalse
@@ -20,12 +22,12 @@ class WireGuardTunnelSnapshotTest {
     }
 
     @Test
-    fun freshHandshakeCountsAsEvidence() {
+    fun freshHandshakeAloneDoesNotCountAsReceivedTraffic() {
         val previous = snapshot(handshake = 1_000L)
         val current = snapshot(handshake = 2_000L)
 
         assertTrue(current.hasRecentHandshake(nowEpochMillis = 2_500L))
-        assertTrue(current.hasTrafficEvidenceSince(previous))
+        assertFalse(current.hasTrafficEvidenceSince(previous))
     }
 
     @Test

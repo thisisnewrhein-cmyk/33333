@@ -26,9 +26,8 @@ data class WireGuardTunnelSnapshot(
     }
 
     fun hasTrafficEvidenceSince(previous: WireGuardTunnelSnapshot): Boolean {
-        val previousHandshake = previous.latestHandshakeEpochMillis ?: 0L
-        val currentHandshake = latestHandshakeEpochMillis ?: 0L
-        return currentHandshake > previousHandshake || receivedBytes > previous.receivedBytes
+        // A new handshake proves peer reachability, but not successful payload traffic.
+        return receivedBytes > previous.receivedBytes
     }
 }
 

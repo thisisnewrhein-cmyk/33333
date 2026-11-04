@@ -136,7 +136,9 @@ fun RouteScoutApp() {
         ConnectionCoordinator(
             listOf(
                 WireGuardEngineAdapter(wireGuardManager) {
-                    latestVpnProbeSnapshot.value = networkDiagnostics.runQuickCheck()
+                    val probe = networkDiagnostics.runQuickCheck()
+                    latestVpnProbeSnapshot.value = probe
+                    probe.httpsLatencyMs != null || probe.siteChecks.any { it.isReachable }
                 }
             )
         )
