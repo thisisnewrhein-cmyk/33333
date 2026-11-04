@@ -46,20 +46,11 @@ class WireGuardManager(context: Context) {
     suspend fun validateConfig(configText: String) = withContext(Dispatchers.IO) {
         val config = Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
         val interfaceConfig = config.getInterface()
-        val packageName = contextPackageName
-
-        if (packageName in interfaceConfig.getExcludedApplications()) {
-            throw IllegalArgumentException(
-                "RouteScout исключён из VPN-профиля. Удали приложение из списка исключений, чтобы проверить туннель."
-            )
-        }
-
-        val includedApplications = interfaceConfig.getIncludedApplications()
-        if (includedApplications.isNotEmpty() && packageName !in includedApplications) {
-            throw IllegalArgumentException(
-                "В VPN-профиле разрешены только отдельные приложения, но RouteScout не включён в этот список."
-            )
-        }
+        WireGuardProfileRoutingValidator.validate(
+            packageName = contextPackageName,
+            includedApplications = interfaceConfig.getIncludedApplications(),
+            excludedApplications = interfaceConfig.getExcludedApplications()
+        )
     }
 
     suspend fun connect(configText: String) = withContext(Dispatchers.IO) {
