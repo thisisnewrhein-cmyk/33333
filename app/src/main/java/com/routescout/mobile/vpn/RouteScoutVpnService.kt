@@ -55,10 +55,8 @@ class RouteScoutVpnService : VpnService() {
                         ?: error("Profile is missing")
                     startCore(profile)
                 }.onFailure {
-                    RouteScoutVpnRuntime.markFailure(
-                        this@RouteScoutVpnService,
-                        "LIBBOX_RELOAD_FAILED"
-                    )
+                    RouteScoutVpnRuntime.markVerification(this@RouteScoutVpnService, false)
+                    updateForegroundNotification("Перезагрузка VPN не подтверждена · требуется проверка")
                 }
             }
         }
@@ -99,10 +97,12 @@ class RouteScoutVpnService : VpnService() {
                         throw cancelled
                     } catch (_: Exception) {
                         stopCore(stopSelfAfter = true)
-                        RouteScoutVpnRuntime.markFailure(
-                            this@RouteScoutVpnService,
-                            "LIBBOX_START_FAILED"
-                        )
+                        if (!RouteScoutVpnRuntime.state.value.isRunning) {
+                            RouteScoutVpnRuntime.markFailure(
+                                this@RouteScoutVpnService,
+                                "LIBBOX_START_FAILED"
+                            )
+                        }
                     }
                 }
             }
