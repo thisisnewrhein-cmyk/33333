@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -49,4 +51,37 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+}
+
+
+val verifyLibboxAar by tasks.registering {
+    doLast {
+        val artifact = configurations.getByName("debugRuntimeClasspath")
+            .resolvedConfiguration.resolvedArtifacts
+            .firstOrNull {
+                it.moduleVersion.id.group == "com.github.singbox-android" &&
+                    it.name == "libbox"
+            } ?: error("Pinned sing-box libbox 1.14.4 AAR was not resolved")
+
+        val digest = MessageDigest.getInstance("SHA-256")
+        artifact.file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        val actual = digest.digest().joinToString("") { byte ->
+            "%02x".format(byte)
+        }
+        val expected = "d2685924a657705beda44e94c6dc499e781df1ad20d65474e3591ec2f8b96465"
+        check(actual.equals(expected, ignoreCase = true)) {
+            "libbox 1.14.4 SHA-256 mismatch: " + actual
+        }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(verifyLibboxAar)
 }
