@@ -90,6 +90,32 @@ object SingBoxConfigValidator {
             }
         }
 
+        val routeRules = route.optJSONArray("rules")
+        val routeRuleScopeKeys = listOf(
+            "domain", "domain_suffix", "domain_keyword", "domain_regex",
+            "ip_cidr", "ip_is_private", "port", "port_range", "network",
+            "protocol", "source_ip_cidr", "source_port", "process_name",
+            "process_path", "package_name", "rule_set", "inbound", "user",
+            "wifi_ssid", "network_type"
+        )
+        if (routeRules != null) {
+            for (index in 0 until routeRules.length()) {
+                val rule = routeRules.optJSONObject(index) ?: continue
+                val outboundTag = rule.optString("outbound")
+                val outboundType = byTag[outboundTag]?.optString("type")?.lowercase()
+                    ?: outboundTag.lowercase()
+                if (outboundType == "direct") {
+                    val hasScope = routeRuleScopeKeys.any { key ->
+                        rule.has(key) && rule.opt(key) != JSONObject.NULL &&
+                            rule.opt(key).toString().isNotBlank()
+                    }
+                    require(hasScope) {
+                        "Безусловное правило direct обходит VPN-маршрут"
+                    }
+                }
+            }
+        }
+
         // Prevent the tunnel's own upstream sockets from being routed back into TUN.
         route.put("auto_detect_interface", true)
 
