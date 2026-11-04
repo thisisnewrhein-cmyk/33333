@@ -1575,7 +1575,7 @@ private fun SettingsScreen() {
         Panel {
             Text("Версия приложения", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(6.dp))
-            Text("RouteScout Mobile 0.6.0", color = RouteMuted, fontSize = 12.sp)
+            Text("RouteScout Mobile 0.6.1", color = RouteMuted, fontSize = 12.sp)
             Text("WireGuard · VPN Gate · Proton Free", color = RouteMuted, fontSize = 11.sp)
         }
     }
