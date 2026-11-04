@@ -272,14 +272,24 @@ class RouteScoutVpnService : VpnService() {
                 }
             } else {
                 val ipv4Routes = options.inet4RouteRange
-                while (ipv4Routes.hasNext()) {
-                    val route = ipv4Routes.next()
-                    builder.addRoute(InetAddress.getByName(route.address()), route.prefix())
+                if (ipv4Routes.hasNext()) {
+                    while (ipv4Routes.hasNext()) {
+                        val route = ipv4Routes.next()
+                        builder.addRoute(InetAddress.getByName(route.address()), route.prefix())
+                    }
+                } else {
+                    builder.addRoute(InetAddress.getByName("0.0.0.0"), 0)
                 }
                 val ipv6Routes = options.inet6RouteRange
-                while (ipv6Routes.hasNext()) {
-                    val route = ipv6Routes.next()
-                    builder.addRoute(InetAddress.getByName(route.address()), route.prefix())
+                if (ipv6Routes.hasNext()) {
+                    while (ipv6Routes.hasNext()) {
+                        val route = ipv6Routes.next()
+                        builder.addRoute(InetAddress.getByName(route.address()), route.prefix())
+                    }
+                } else {
+                    // Older Android releases use addRoute(address, prefix), but the
+                    // IPv6 default route is still mandatory to avoid a direct bypass.
+                    builder.addRoute(InetAddress.getByName("::"), 0)
                 }
             }
 
