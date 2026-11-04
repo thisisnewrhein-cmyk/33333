@@ -129,7 +129,6 @@ internal object OpenVpnProfileSanitizer {
             if (openingBlock != null) {
                 activeBlock = openingBlock
                 if (openingBlock == "auth-user-pass") hasAuthUserPass = true
-                if (openingBlock == "ca") caPem.appendLine(line)
                 if (openingBlock !in discardedInlineBlocks) output.appendLine(line)
                 return@forEach
             }
@@ -225,7 +224,7 @@ internal object OpenVpnProfileSanitizer {
             output.appendLine("auth-user-pass")
         }
 
-        return output.toString().trimEnd() + "\\n"
+        return output.toString().trimEnd() + "\n"
     }
 
     private fun validateCaCertificates(pem: String) {
