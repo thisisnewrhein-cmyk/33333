@@ -229,7 +229,7 @@ internal object OpenVpnProfileSanitizer {
 
     private fun validateCaCertificates(pem: String) {
         val certificateBlocks = Regex(
-            "-----BEGIN CERTIFICATE-----[\\\\s\\\\S]*?-----END CERTIFICATE-----"
+            "-----BEGIN CERTIFICATE-----[\\s\\S]*?-----END CERTIFICATE-----"
         ).findAll(pem).toList()
         if (certificateBlocks.isEmpty()) {
             throw IOException("The inline CA block contains no X.509 certificate")
