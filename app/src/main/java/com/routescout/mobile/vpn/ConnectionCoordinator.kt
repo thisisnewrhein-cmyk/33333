@@ -32,8 +32,8 @@ class ConnectionCoordinator(engines: Collection<VpnEngine>) {
 
             // Re-read live state; do not trust a possibly stale connect() result.
             val observed = engine.status()
-            if (observed.engineId != null && observed.engineId != engineId) {
-                throw IllegalStateException("VPN engine returned a status for a different engine")
+            if (observed.engineId != engineId) {
+                throw IllegalStateException("VPN engine returned a status for a different or unknown engine")
             }
             if (!observed.isConnected) throw EngineConnectionException(observed)
             observed
@@ -63,8 +63,8 @@ class ConnectionCoordinator(engines: Collection<VpnEngine>) {
     suspend fun currentStatus(): VpnEngineStatus = mutex.withLock {
         val observed = enginesById.map { (id, engine) ->
             val status = engine.status()
-            if (status.engineId != null && status.engineId != id) {
-                throw IllegalStateException("VPN engine returned a status for a different engine")
+            if (status.isRunning && status.engineId != id) {
+                throw IllegalStateException("VPN engine returned a status for a different or unknown engine")
             }
             status
         }
@@ -123,7 +123,11 @@ class ConnectionCoordinator(engines: Collection<VpnEngine>) {
 
         if (observed.isRunning) {
             val failure = IllegalStateException(
-                "VPN engine still reports an active tunnel after disconnect()"
+                if (observed.engineId != engine.id) {
+                    "A tunnel is still active, but its engine identity could not be confirmed"
+                } else {
+                    "VPN engine still reports an active tunnel after disconnect()"
+                }
             )
             disconnectFailure?.let(failure::addSuppressed)
             throw failure
