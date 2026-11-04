@@ -1484,6 +1484,7 @@ private fun DiagnosticsScreen(
 
 @Composable
 private fun SettingsScreen() {
+    val context = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Настройки", color = RouteText, fontSize = 31.sp, fontFamily = FontFamily.Serif)
         Text("Приватность и параметры приложения", color = RouteMuted, fontSize = 13.sp)
@@ -1498,10 +1499,41 @@ private fun SettingsScreen() {
             )
         }
         Panel {
+            Text("Открытый исходный код", color = RouteText, fontSize = 19.sp, fontFamily = FontFamily.Serif)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "RouteScout распространяется по лицензии GNU GPL-3.0-only. Пользователи вправе получать, изменять и распространять исходный код на условиях этой лицензии. Приложение предоставляется без гарантий.",
+                color = RouteMuted,
+                fontSize = 12.sp,
+                lineHeight = 18.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("https://github.com/thisisnewrhein-cmyk/33333/blob/codex/routescout-mobile/LICENSE")
+                            )
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = RouteSurfaceRaised,
+                    contentColor = RouteCyan
+                )
+            ) {
+                Text("Открыть текст GPL-3.0")
+            }
+        }
+        Panel {
             Text("Версия приложения", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(6.dp))
-            Text("RouteScout Mobile 0.5.0", color = RouteMuted, fontSize = 12.sp)
-            Text("VPN Gate и Proton Free · WireGuard", color = RouteMuted, fontSize = 11.sp)
+            Text("RouteScout Mobile 0.6.0", color = RouteMuted, fontSize = 12.sp)
+            Text("WireGuard · VPN Gate · Proton Free", color = RouteMuted, fontSize = 11.sp)
         }
     }
 }
