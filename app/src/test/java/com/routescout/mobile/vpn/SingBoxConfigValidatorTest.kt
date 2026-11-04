@@ -88,6 +88,38 @@ class SingBoxConfigValidatorTest {
     }
 
     @Test
+    fun addsRouteScoutToAnImportedPackageAllowlistForTunnelVerification() {
+        val profile = validProfile.replace(
+            "\"auto_route\": true",
+            "\"auto_route\": true, \"include_package\": [\"com.example.browser\"]"
+        )
+        val summary = SingBoxConfigValidator.validateAndNormalize(
+            profile,
+            "com.routescout.mobile"
+        )
+        val tun = JSONObject(summary.normalizedJson).getJSONArray("inbounds").getJSONObject(0)
+        val packages = tun.getJSONArray("include_package")
+        assertTrue((0 until packages.length()).any {
+            packages.getString(it) == "com.routescout.mobile"
+        })
+    }
+
+    @Test
+    fun rejectsExcludingRouteScoutFromTheVpnTunnel() {
+        val profile = validProfile.replace(
+            "\"auto_route\": true",
+            "\"auto_route\": true, \"exclude_package\": [\"com.routescout.mobile\"]"
+        )
+        var rejected = false
+        try {
+            SingBoxConfigValidator.validateAndNormalize(profile, "com.routescout.mobile")
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
+    }
+
+    @Test
     fun rejectsAndroidIncompatibleSimultaneousPackageAllowAndDenyLists() {
         val profile = validProfile.replace(
             "\"auto_route\": true",
