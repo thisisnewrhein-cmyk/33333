@@ -153,6 +153,6 @@ object SingBoxConfigValidator {
     private fun extractEndpoint(outbound: JSONObject): String? {
         val host = outbound.optString("server").takeIf { it.isNotBlank() } ?: return null
         val port = outbound.optInt("server_port", 0)
-        return if (port in 1..65535) "\$host:\$port" else host
+        return if (port in 1..65535) "$host:$port" else host
     }
 }
