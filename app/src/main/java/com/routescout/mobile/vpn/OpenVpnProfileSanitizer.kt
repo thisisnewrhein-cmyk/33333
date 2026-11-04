@@ -177,7 +177,7 @@ internal object OpenVpnProfileSanitizer {
             if (directive == "dev") {
                 val device = stripInlineComment(parts.getOrNull(1).orEmpty())
                     .lowercase(Locale.ROOT)
-                if (device != "tun") {
+                if (!device.matches(Regex("tun[0-9]*"))) {
                     throw IOException("Only OpenVPN TUN profiles are supported")
                 }
             }
