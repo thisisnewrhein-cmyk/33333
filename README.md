@@ -12,7 +12,7 @@ Implemented in this branch:
 - Mobile navigation for Overview, Servers, Diagnostics, and Settings.
 - Real on-device baseline checks for Android network validation, DNS resolution, and HTTPS reachability to example.com.
 - GitHub Actions workflow to build a debug APK.
-- Official VPN Gate public relay catalog fetched over HTTPS and automatically refreshed when the server screen is reopened after 15 minutes.
+- Official VPN Gate public relay catalog fetched over HTTPS, refreshed on demand, and periodically refreshed in the background through WorkManager (subject to Android scheduling).
 - CSV parsing with quoted-field support, profile validation, and duplicate removal.
 - Server ranking based on VPN Gate's published score, ping, and throughput.
 - On-demand TCP endpoint checks from the device; UDP is explicitly marked unverified until an actual VPN handshake.
@@ -32,7 +32,7 @@ Not implemented yet:
 - An embedded OpenVPN engine. VPN Gate profiles are currently handed off to an installed OpenVPN client; RouteScout does not yet own that OpenVPN tunnel.
 - Automated Proton account authentication/configuration retrieval. Proton's official account portal is used for config generation; RouteScout does not scrape private endpoints or store Proton credentials.
 - Automatic server failover after an OpenVPN tunnel drops or a multi-profile WireGuard failover manager.
-- Automatic IP switching and comparison with the pre-VPN IP.
+- Automatic switching to a backup server after a failed connection (the current WireGuard flow compares the public IP before and after connection but does not automatically rotate servers).
 - Per-app and per-domain routing.
 - Full speed, packet-loss, jitter, and leak testing.
 
@@ -45,7 +45,7 @@ The UI deliberately does not invent server locations, connection states, ping va
 - **VPN Gate:** public volunteer relay directory, dynamic server list, OpenVPN profile export. An installed OpenVPN client is currently required for the handoff.
 - **Proton VPN Free:** requires a free Proton account. The official portal can generate a WireGuard configuration on the Free plan; import the downloaded .conf into RouteScout to use its built-in WireGuard engine. The Free plan has one simultaneous device and free locations in ten countries; Proton states there are no data or time limits. The account portal is user-operated; RouteScout does not automate sign-in.
 
-The automatically refreshed free-server catalog currently uses the official VPN Gate public directory. Proton remains an official user-generated configuration workflow; RouteScout does not automate Proton sign-in. Other third-party public catalogs may require temporary API keys, additional protocol engines, or provider-specific downloads and are not silently trusted or imported. The free-server catalog uses the official VPN Gate public directory. Its relays are operated by volunteers, not by RouteScout. Availability, speed, and trustworthiness vary; do not send passwords or sensitive traffic through an untrusted relay. The directory's ping and score are upstream measurements, not measurements from the user's device. Public-IP checks contact ipify.org and ipapi.co; those services see the public IP making the request. RouteScout does not upload diagnostic reports. RouteScout can independently probe TCP endpoints; UDP reachability is only established by a successful OpenVPN handshake.
+The automatically refreshed free-server catalog currently uses the official VPN Gate public directory. Proton remains an official user-generated configuration workflow; RouteScout does not automate Proton sign-in. Other third-party public catalogs may require temporary API keys, additional protocol engines, or provider-specific downloads and are not silently trusted or imported. Its relays are operated by volunteers, not by RouteScout. Availability, speed, and trustworthiness vary; do not send passwords or sensitive traffic through an untrusted relay. The directory's ping and score are upstream measurements, not measurements from the user's device. Public-IP checks contact ipify.org and ipapi.co; those services see the public IP making the request. RouteScout does not upload diagnostic reports. RouteScout can independently probe TCP endpoints; UDP reachability is only established by a successful OpenVPN handshake.
 
 RouteScout currently exports a selected OpenVPN profile to an installed OpenVPN client. Background TCP preflight does not prove that an OpenVPN or UDP tunnel can complete a handshake. The user must complete the import and connection in that client and enter vpn / vpn if the relay requests credentials. This handoff is explicit; the app does not claim an OpenVPN tunnel is active when it cannot observe that tunnel.
 
@@ -72,7 +72,7 @@ The visual language follows the supplied reference image:
 1. Integrate a maintained OpenVPN engine into RouteScout, subject to compatible licensing and Android lifecycle review.
 2. Integrate and observe an in-app OpenVPN handshake state and tunnel byte counters, subject to compatible licensing.
 3. Verify public IPv4/IPv6, DNS routing, and leaks after a real handshake.
-4. Add measured server health checks and automatic failover with bounded retries.
+4. Extend measured server health checks beyond the current top-12 TCP preflight and add automatic failover with bounded retries.
 5. Add IPv6/DNS leak verification, jitter, packet-loss sampling, and opt-in throughput tests.
 6. Add country filters, favourites, multi-profile storage, and server history.
 7. Validate on physical Android devices and build a release APK.
