@@ -55,6 +55,16 @@ object RouteScoutVpnRuntime {
     }
 
     @Synchronized
+    fun markStopUnverified(context: Context, code: String) {
+        preferences(context).edit().putBoolean(KEY_MAY_BE_ACTIVE, true).apply()
+        mutableState.value = RouteScoutVpnRuntimeState(
+            isRunning = true,
+            isVerified = false,
+            failureCode = code
+        )
+    }
+
+    @Synchronized
     fun markStopped(context: Context) {
         preferences(context).edit().putBoolean(KEY_MAY_BE_ACTIVE, false).apply()
         mutableState.value = RouteScoutVpnRuntimeState()
