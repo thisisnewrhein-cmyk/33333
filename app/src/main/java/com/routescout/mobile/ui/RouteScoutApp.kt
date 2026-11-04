@@ -96,6 +96,8 @@ import com.routescout.mobile.vpn.ServerSelectionEngine
 import com.routescout.mobile.vpn.ServerHealthChecker
 import com.routescout.mobile.vpn.ServerHealthResult
 import com.routescout.mobile.vpn.ProtonFreeProvider
+import com.routescout.mobile.vpn.VpnCatalogCache
+import com.routescout.mobile.vpn.VpnCatalogWorkScheduler
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.config.Config
 import java.io.ByteArrayInputStream
@@ -105,6 +107,9 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 private const val FREE_SERVER_REFRESH_INTERVAL_MS = 15 * 60 * 1000L
 
@@ -137,6 +142,8 @@ fun RouteScoutApp() {
     var freeServerActionMessage by remember { mutableStateOf<String?>(null) }
     var exportingServerKey by remember { mutableStateOf<String?>(null) }
     var snapshot by remember { mutableStateOf(DiagnosticSnapshot()) }
+    var preVpnPublicIp by remember { mutableStateOf<String?>(null) }
+    var vpnIpChanged by remember { mutableStateOf<Boolean?>(null) }
     var isChecking by remember { mutableStateOf(false) }
     var profileImported by remember { mutableStateOf(false) }
     var profileEndpoint by remember { mutableStateOf<String?>(null) }
@@ -153,11 +160,20 @@ fun RouteScoutApp() {
                     val configText = withContext(Dispatchers.IO) {
                         configStore.load() ?: error("No WireGuard profile")
                     }
+                    val baselineSnapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
+                    preVpnPublicIp = baselineSnapshot.publicIp
+                    snapshot = baselineSnapshot
+
                     val previousTunnel = wireGuardManager.getSnapshot()
                     wireGuardManager.connect(configText)
 
                     // Generate real traffic through the VPN before checking peer statistics.
                     snapshot = NetworkDiagnosticsRepository(context).runQuickCheck()
+                    vpnIpChanged = when {
+                        preVpnPublicIp != null && snapshot.publicIp != null ->
+                            preVpnPublicIp != snapshot.publicIp
+                        else -> null
+                    }
                     val verifiedTunnel = wireGuardManager.waitForHandshake(previousTunnel)
                     isVpnTunnelUp = verifiedTunnel.isUp
                     isVpnConnected =
@@ -166,7 +182,11 @@ fun RouteScoutApp() {
                         verifiedTunnel.hasTrafficEvidenceSince(previousTunnel)
 
                     vpnMessage = if (isVpnConnected) {
-                        "WireGuard handshake подтверждён"
+                        when (vpnIpChanged) {
+                            true -> "WireGuard handshake подтверждён · внешний IP изменился"
+                            false -> "WireGuard handshake подтверждён, но внешний IP не изменился"
+                            null -> "WireGuard handshake подтверждён · сравнение IP недоступно"
+                        }
                     } else if (verifiedTunnel.isUp) {
                         "Туннель запущен, но сервер не подтвердил handshake. Проверь Endpoint, ключи и доступность сервера."
                     } else {
@@ -251,6 +271,18 @@ fun RouteScoutApp() {
 
     LaunchedEffect(Unit) {
         try {
+            VpnCatalogWorkScheduler.schedule(context)
+            val cachedCatalog = withContext(Dispatchers.IO) {
+                VpnCatalogCache(context).load()
+            }
+            if (cachedCatalog != null) {
+                freeServers = cachedCatalog.servers
+                serverHealthResults = cachedCatalog.healthResults
+                freeServersFetchedAtMs = cachedCatalog.updatedAtMs
+                freeServersUpdated = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                    .format(Date(cachedCatalog.updatedAtMs))
+            }
+
             val savedConfig = withContext(Dispatchers.IO) { configStore.load() }
             profileImported = savedConfig != null
             profileEndpoint = savedConfig?.let { extractEndpoint(it) }
@@ -285,9 +317,24 @@ fun RouteScoutApp() {
                 isLoadingFreeServers = true
                 freeServersError = null
                 try {
-                    freeServers = vpnGateRepository.refresh()
-                    freeServersFetchedAtMs = System.currentTimeMillis()
-                    freeServersUpdated = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                    val refreshedServers = vpnGateRepository.refresh()
+                    val healthResults = coroutineScope {
+                        ServerSelectionEngine.rankedServers(refreshedServers)
+                            .take(12)
+                            .map { server ->
+                                async { server.key to serverHealthChecker.check(server) }
+                            }
+                            .awaitAll()
+                            .toMap()
+                    }
+                    val fetchedAt = System.currentTimeMillis()
+                    freeServers = refreshedServers
+                    serverHealthResults = healthResults
+                    freeServersFetchedAtMs = fetchedAt
+                    freeServersUpdated = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(fetchedAt))
+                    withContext(Dispatchers.IO) {
+                        VpnCatalogCache(context).save(refreshedServers, healthResults, fetchedAt)
+                    }
                 } catch (error: Exception) {
                     freeServersError = error.message?.take(160) ?: "Не удалось обновить каталог VPN Gate"
                 } finally {
@@ -663,6 +710,10 @@ private fun OverviewScreen(
             isChecking = isChecking,
             onRunDiagnostics = onRunDiagnostics
         )
+
+        if (snapshot.siteChecks.isNotEmpty()) {
+            SiteAccessPanel(snapshot)
+        }
 
         ServerPreviewPanel(onOpenServers = onOpenServers)
 
@@ -1072,6 +1123,13 @@ private fun ServersScreen(
                 fontSize = 11.sp,
                 lineHeight = 16.sp
             )
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "Автообновление: каждые 15 минут при наличии сети. Android может отложить фоновую задачу из-за энергосбережения; автоматически перепроверяются до 12 серверов.",
+                color = RouteCyan,
+                fontSize = 10.sp,
+                lineHeight = 14.sp
+            )
             if (freeServersUpdated != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -1319,6 +1377,65 @@ private fun PublicIpPanel(snapshot: DiagnosticSnapshot) {
 }
 
 @Composable
+private fun SiteAccessPanel(snapshot: DiagnosticSnapshot) {
+    Panel {
+        Text("Доступ к зарубежным сайтам", color = RouteText, fontSize = 19.sp, fontFamily = FontFamily.Serif)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            snapshot.siteAccessSummary ?: "Запусти диагностику, чтобы проверить DNS и HTTPS у зарубежных ресурсов.",
+            color = if (snapshot.filteringSuspected == true) RouteCoralSoft else RouteMuted,
+            fontSize = 11.sp,
+            lineHeight = 16.sp
+        )
+        if (snapshot.siteChecks.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            snapshot.siteChecks.forEach { check ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(check.label, color = RouteText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Text(check.host, color = RouteMuted, fontSize = 9.sp)
+                    }
+                    Text(
+                        when (check.failure) {
+                            com.routescout.mobile.diagnostics.SiteProbeFailure.NONE -> "Доступен"
+                            com.routescout.mobile.diagnostics.SiteProbeFailure.DNS -> "Ошибка DNS"
+                            com.routescout.mobile.diagnostics.SiteProbeFailure.HTTPS -> "Ошибка HTTPS"
+                        },
+                        color = if (check.isReachable) RouteCyan else RouteCoralSoft,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                val timing = buildString {
+                    check.dnsLatencyMs?.let { append("DNS " + it + " ms") }
+                    check.httpsLatencyMs?.let {
+                        if (isNotEmpty()) append(" · ")
+                        append("HTTPS " + it + " ms")
+                    }
+                    check.httpStatusCode?.let {
+                        if (isNotEmpty()) append(" · ")
+                        append("HTTP " + it)
+                    }
+                }
+                if (timing.isNotBlank()) Text(timing, color = RouteMuted, fontSize = 9.sp)
+                if (check.error != null) Text(check.error, color = RouteCoralSoft, fontSize = 9.sp)
+                if (check.httpStatusCode == 403 || check.httpStatusCode == 451) {
+                    Text(
+                        "Сервер вернул ограничивающий HTTP-ответ; это само по себе не доказывает блокировку оператором.",
+                        color = RouteMuted,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun DiagnosticsScreen(
     snapshot: DiagnosticSnapshot,
     isChecking: Boolean,
@@ -1328,6 +1445,7 @@ private fun DiagnosticsScreen(
         Text("Диагностика", color = RouteText, fontSize = 31.sp, fontFamily = FontFamily.Serif)
         Text("Проверки выполняются на устройстве", color = RouteMuted, fontSize = 13.sp)
         NetworkHealthPanel(snapshot, isChecking, onRunDiagnostics)
+        SiteAccessPanel(snapshot)
         Panel {
             Text("Результаты последней проверки", color = RouteText, fontSize = 19.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(10.dp))

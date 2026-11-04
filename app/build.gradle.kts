@@ -12,8 +12,8 @@ android {
         applicationId = "com.routescout.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
     }
 
     buildFeatures {
@@ -41,6 +41,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.wireguard.android:tunnel:1.0.20260102")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
 
     debugImplementation("androidx.compose.ui:ui-tooling")

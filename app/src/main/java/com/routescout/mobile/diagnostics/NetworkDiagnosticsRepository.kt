@@ -12,11 +12,13 @@ import org.json.JSONObject
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLHandshakeException
 
 class NetworkDiagnosticsRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -59,6 +61,13 @@ class NetworkDiagnosticsRepository(context: Context) {
         } catch (_: Exception) {
             null
         }
+
+        // Probe foreign services against example.com as a neutral control.
+        // A failed site is evidence of a reachability problem, not proof of ISP filtering.
+        val siteChecks = coroutineScope {
+            SITE_PROBE_TARGETS.map { target -> async { probeSite(target) } }.awaitAll()
+        }
+        val siteAssessment = SiteAccessAnalyzer.analyze(siteChecks)
 
         // Independent public-IP sources run concurrently. Their services see the
         // public IP making the request; no diagnostic report is uploaded.
@@ -108,9 +117,89 @@ class NetworkDiagnosticsRepository(context: Context) {
             countryName = ipResult.metadata?.countryName,
             countryCode = ipResult.metadata?.countryCode,
             asn = ipResult.metadata?.asn,
-            ipSourcesAgree = ipSourcesAgree
+            ipSourcesAgree = ipSourcesAgree,
+            siteChecks = siteChecks,
+            siteAccessSummary = siteAssessment.summary,
+            filteringSuspected = siteAssessment.filteringSuspected
         )
     }
+
+    private fun probeSite(target: SiteProbeTarget): SiteConnectivityResult {
+        val dnsStartedAt = SystemClock.elapsedRealtime()
+        val dnsLatency = try {
+            InetAddress.getAllByName(target.host)
+            SystemClock.elapsedRealtime() - dnsStartedAt
+        } catch (error: Exception) {
+            return SiteConnectivityResult(
+                label = target.label,
+                host = target.host,
+                failure = SiteProbeFailure.DNS,
+                error = "DNS: " + error.javaClass.simpleName
+            )
+        }
+
+        val connection = try {
+            URL(target.url).openConnection() as HttpsURLConnection
+        } catch (error: Exception) {
+            return SiteConnectivityResult(
+                label = target.label,
+                host = target.host,
+                dnsLatencyMs = dnsLatency,
+                failure = SiteProbeFailure.HTTPS,
+                error = "HTTPS: " + error.javaClass.simpleName
+            )
+        }
+        connection.connectTimeout = SITE_PROBE_TIMEOUT_MS
+        connection.readTimeout = SITE_PROBE_TIMEOUT_MS
+        connection.requestMethod = "GET"
+        connection.instanceFollowRedirects = true
+        connection.useCaches = false
+        connection.setRequestProperty("User-Agent", "RouteScoutMobile/0.5.0")
+
+        val httpsStartedAt = SystemClock.elapsedRealtime()
+        return try {
+            val statusCode = connection.responseCode
+            SiteConnectivityResult(
+                label = target.label,
+                host = target.host,
+                dnsLatencyMs = dnsLatency,
+                httpsLatencyMs = SystemClock.elapsedRealtime() - httpsStartedAt,
+                httpStatusCode = statusCode
+            )
+        } catch (_: SSLHandshakeException) {
+            SiteConnectivityResult(
+                label = target.label,
+                host = target.host,
+                dnsLatencyMs = dnsLatency,
+                failure = SiteProbeFailure.HTTPS,
+                error = "TLS handshake failed"
+            )
+        } catch (_: SocketTimeoutException) {
+            SiteConnectivityResult(
+                label = target.label,
+                host = target.host,
+                dnsLatencyMs = dnsLatency,
+                failure = SiteProbeFailure.HTTPS,
+                error = "HTTPS timeout"
+            )
+        } catch (error: Exception) {
+            SiteConnectivityResult(
+                label = target.label,
+                host = target.host,
+                dnsLatencyMs = dnsLatency,
+                failure = SiteProbeFailure.HTTPS,
+                error = "HTTPS: " + error.javaClass.simpleName
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private data class SiteProbeTarget(
+        val label: String,
+        val host: String,
+        val url: String
+    )
 
     private fun fetchJsonIp(url: String): InetAddress? {
         val body = fetchHttpsBody(url) ?: return null
@@ -215,5 +304,16 @@ class NetworkDiagnosticsRepository(context: Context) {
         private const val IPV6_CHECK_URL = "https://api6.ipify.org"
         private const val IP_METADATA_URL = "https://ipapi.co/json/"
         private const val IP_CHECK_TIMEOUT_MS = 3_500
+        private const val SITE_PROBE_TIMEOUT_MS = 3_500
+        private val SITE_PROBE_TARGETS = listOf(
+            SiteProbeTarget("Контрольный сайт", "example.com", "https://example.com/"),
+            SiteProbeTarget("Google", "www.google.com", "https://www.google.com/generate_204"),
+            SiteProbeTarget("YouTube", "www.youtube.com", "https://www.youtube.com/generate_204"),
+            SiteProbeTarget("GitHub", "github.com", "https://github.com/"),
+            SiteProbeTarget("OpenAI", "openai.com", "https://openai.com/"),
+            SiteProbeTarget("Discord", "discord.com", "https://discord.com/"),
+            SiteProbeTarget("Telegram", "telegram.org", "https://telegram.org/"),
+            SiteProbeTarget("Wikipedia", "wikipedia.org", "https://wikipedia.org/")
+        )
     }
 }
