@@ -9,6 +9,7 @@ import android.net.Uri
 import android.net.VpnService
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -574,6 +575,14 @@ fun RouteScoutApp() {
         }
     }
 
+    val openSystemVpnSettings: () -> Unit = {
+        runCatching {
+            context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+        }.onFailure {
+            vpnMessage = "Не удалось открыть настройки VPN. Найди в Android: Сеть и интернет → VPN."
+        }
+    }
+
     val prepareDiagnosticReport: () -> Unit = {
         if (!isFullDiagnosticsRunning) {
             scope.launch {
@@ -709,7 +718,7 @@ fun RouteScoutApp() {
                         onPrepareReport = prepareDiagnosticReport,
                         reportMessage = diagnosticReportMessage
                     )
-                    AppTab.SETTINGS -> SettingsScreen()
+                    AppTab.SETTINGS -> SettingsScreen(onOpenVpnSettings = openSystemVpnSettings)
                 }
                 Text(
                     text = "ROUTESCOUT MOBILE  •  PRIVATE BY DESIGN",
@@ -1727,15 +1736,28 @@ private fun DiagnosticsScreen(
 }
 
 @Composable
-private fun SettingsScreen() {
+private fun SettingsScreen(onOpenVpnSettings: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Настройки", color = RouteText, fontSize = 31.sp, fontFamily = FontFamily.Serif)
         Text("Приватность и параметры приложения", color = RouteMuted, fontSize = 13.sp)
         Panel {
+            Text("Системный Kill Switch", color = RouteText, fontSize = 19.sp, fontFamily = FontFamily.Serif)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Для защиты после закрытия или сбоя приложения открой системные настройки VPN и включи Always-on VPN и «Блокировать подключения без VPN», если Android показывает эту опцию. Это системная функция Android: RouteScout не может безопасно включить её скрытно из приложения.",
+                color = RouteMuted,
+                fontSize = 12.sp,
+                lineHeight = 18.sp
+            )
+            Button(onClick = onOpenVpnSettings, modifier = Modifier.fillMaxWidth()) {
+                Text("Открыть настройки VPN Android")
+            }
+        }
+        Panel {
             Text("Конфиденциальность", color = RouteText, fontSize = 19.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Базовые проверки выполняются на устройстве. Для определения публичного IP RouteScout обращается к ipify.org и ipapi.co; эти сервисы видят IP-адрес запроса. Диагностические отчёты автоматически не отправляются.",
+                "Проверки выполняются на устройстве. Для определения публичного IP RouteScout обращается к внешним сервисам; они видят IP-адрес запроса. Диагностические отчёты автоматически не отправляются. Точные IP и endpoint включаются в отчёт только по отдельному согласию.",
                 color = RouteMuted,
                 fontSize = 12.sp,
                 lineHeight = 18.sp
@@ -1744,8 +1766,9 @@ private fun SettingsScreen() {
         Panel {
             Text("Версия приложения", color = RouteText, fontSize = 18.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(6.dp))
-            Text("RouteScout Mobile 0.5.0", color = RouteMuted, fontSize = 12.sp)
-            Text("VPN Gate и Proton Free · WireGuard", color = RouteMuted, fontSize = 11.sp)
+            Text("RouteScout Mobile 0.7.0", color = RouteMuted, fontSize = 12.sp)
+            Text("WireGuard + sing-box · Shadowsocks, VMess, VLESS, Trojan, Hysteria2, TUIC, AnyTLS", color = RouteMuted, fontSize = 11.sp)
+            Text("VPN Gate / OpenVPN — передача профиля внешнему клиенту", color = RouteMuted, fontSize = 11.sp)
         }
     }
 }
