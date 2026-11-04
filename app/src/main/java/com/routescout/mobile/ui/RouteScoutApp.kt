@@ -128,7 +128,7 @@ fun RouteScoutApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val configStore = remember(context) { SecureConfigStore(context) }
-    val wireGuardManager = remember(context) { WireGuardManager(context) }
+    val wireGuardManager = remember(context.applicationContext) { WireGuardManager.getInstance(context) }
     val vpnGateRepository = remember { VpnGateRepository() }
     val profileExporter = remember(context) { VpnGateProfileExporter(context) }
     val serverHealthChecker = remember { ServerHealthChecker() }
