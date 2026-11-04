@@ -676,6 +676,7 @@ fun RouteScoutApp() {
                         onAutoSelectFreeServer = autoSelectFreeServer,
                         onOpenFreeServerProfile = openFreeServerProfile,
                         profileImported = profileImported,
+                        profileEngine = activeProfileEngine,
                         profileEndpoint = profileEndpoint,
                         isVpnConnected = isVpnConnected,
                         isVpnTunnelUp = isVpnTunnelUp,
@@ -1130,6 +1131,7 @@ private fun ServersScreen(
     onAutoSelectFreeServer: () -> Unit,
     onOpenFreeServerProfile: (FreeVpnServer) -> Unit,
     profileImported: Boolean,
+    profileEngine: VpnEngineId,
     profileEndpoint: String?,
     isVpnConnected: Boolean,
     isVpnTunnelUp: Boolean,
@@ -1155,14 +1157,20 @@ private fun ServersScreen(
             }
             Spacer(Modifier.height(15.dp))
             Text(
-                if (profileImported) "VPN-профиль добавлен" else "Нет добавленных серверов",
+                if (profileImported) {
+                    if (profileEngine == VpnEngineId.SING_BOX) "sing-box профиль добавлен"
+                    else "WireGuard профиль добавлен"
+                } else "Нет добавленных серверов",
                 color = RouteText,
                 fontSize = 21.sp,
                 fontFamily = FontFamily.Serif
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                if (profileImported) "Профиль сохранён локально в зашифрованном виде." else "Импортируй WireGuard (.conf) или sing-box JSON с TUN inbound от своего провайдера.",
+                if (profileImported) {
+                    if (profileEngine == VpnEngineId.SING_BOX) "sing-box JSON сохранён локально в зашифрованном виде."
+                    else "WireGuard .conf сохранён локально в зашифрованном виде."
+                } else "Импортируй WireGuard (.conf) или sing-box JSON с TUN inbound от своего провайдера.",
                 color = RouteMuted,
                 fontSize = 12.sp,
                 lineHeight = 18.sp
