@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.IpPrefix
+import java.net.InetAddress
 import android.net.VpnService
 import android.os.Build
 import android.os.IBinder
@@ -130,7 +131,7 @@ class RouteScoutVpnService : VpnService() {
         RouteScoutVpnRuntime.markStarting(this@RouteScoutVpnService)
         ensureLibboxSetup()
 
-        val server = commandServer ?: CommandServer(commandHandler, platformInterface).also {
+        val server: CommandServer = commandServer ?: CommandServer(commandHandler, platformInterface).also {
             it.start()
             commandServer = it
         }
@@ -239,10 +240,10 @@ class RouteScoutVpnService : VpnService() {
                 if (ipv4Routes.hasNext()) {
                     while (ipv4Routes.hasNext()) {
                         val route = ipv4Routes.next()
-                        builder.addRoute(IpPrefix("\${route.address()}/\${route.prefix()}"))
+                        builder.addRoute(IpPrefix(InetAddress.getByName(route.address()), route.prefix()))
                     }
                 } else {
-                    builder.addRoute("0.0.0.0", 0)
+                    builder.addRoute(InetAddress.getByName("0.0.0.0"), 0)
                 }
 
                 val ipv6Routes = options.inet6RouteAddress
@@ -253,7 +254,7 @@ class RouteScoutVpnService : VpnService() {
                     }
                 } else {
                     // Capture IPv6 even if the remote outbound cannot route it: fail closed.
-                    builder.addRoute("::", 0)
+                    builder.addRoute(InetAddress.getByName("::"), 0)
                 }
 
                 val ipv4Exclusions = options.inet4RouteExcludeAddress
@@ -270,7 +271,7 @@ class RouteScoutVpnService : VpnService() {
                 val ipv4Routes = options.inet4RouteRange
                 while (ipv4Routes.hasNext()) {
                     val route = ipv4Routes.next()
-                    builder.addRoute(route.address(), route.prefix())
+                    builder.addRoute(InetAddress.getByName(route.address()), route.prefix())
                 }
                 val ipv6Routes = options.inet6RouteRange
                 while (ipv6Routes.hasNext()) {
