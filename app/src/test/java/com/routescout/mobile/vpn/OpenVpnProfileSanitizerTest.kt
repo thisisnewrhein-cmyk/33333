@@ -137,6 +137,13 @@ class OpenVpnProfileSanitizerTest {
     }
 
     @Test
+    fun acceptsTlsClientModeWithoutClientShortcut() {
+        val profile = validProfile().replaceFirst("client", "tls-client")
+        val sanitized = OpenVpnProfileSanitizer.sanitize(profile)
+        assertTrue(sanitized.contains("tls-client"))
+    }
+
+    @Test
     fun acceptsNumberedTunDeviceNames() {
         val sanitized = OpenVpnProfileSanitizer.sanitize(validProfile(device = "tun0"))
         assertTrue(sanitized.contains("dev tun0"))
