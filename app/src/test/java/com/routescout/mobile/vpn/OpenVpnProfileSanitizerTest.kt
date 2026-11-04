@@ -163,7 +163,23 @@ class OpenVpnProfileSanitizerTest {
         remote 198.51.100.10 443
         <ca>
         -----BEGIN CERTIFICATE-----
-        MIIB-test-certificate-payload
+        MIIDKzCCAhOgAwIBAgIUaxsG5uJMvP4ypgrNllWf8pwAAvQwDQYJKoZIhvcNAQEL
+        BQAwHTEbMBkGA1UEAwwSUm91dGVTY291dCBUZXN0IENBMB4XDTI2MTEwNDEwNDEw
+        MFoXDTM2MTEwMTEwNDEwMFowHTEbMBkGA1UEAwwSUm91dGVTY291dCBUZXN0IENB
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArjtSz9y1MNyQiJujg+4l
+        Q5dfz12apmYENC8YLKEmLwxrPj1/pEfK3u4nsayFgMurpDXdBNoECR9XPugaA2Rm
+        9/XtLGI1BtBGxOcLr+9nTEqfQN4ziGW7mZPknXTFaCIOuplB37sKQXQzx/i1bZPg
+        Fk2o4aRLl76j6GT0piL8PWt2OwFWIq6RJFkVu5w0ZbSfyEIRNeC7cVFNbX7qbiJa
+        6ANDZ+vry4/qZK+dGGzJukOwSwZxh/zI0saH/QgL52EEjhX+JlbpC9tlL5mlUFIf
+        93Ieff1KuzqXfqakqkcLCZkkuU7hCDYvrY8Rns3ThXOafwAkWpmOUQxo2rO0yXsr
+        +QIDAQABo2MwYTAdBgNVHQ4EFgQUlS7DsJuyzCFCUsSDD1qtSDNtSjAwHwYDVR0j
+        BBgwFoAUlS7DsJuyzCFCUsSDD1qtSDNtSjAwDwYDVR0TAQH/BAUwAwEB/zAOBgNV
+        HQ8BAf8EBAMCAQYwDQYJKoZIhvcNAQELBQADggEBAKin+k8qW/3xWE3HwMuthHio
+        4n5sTVE27aOaE1UmnSNtmqOkhcikbl/Zbxw4mFvS9/9L39psOhFVCVmwgCvvOuaT
+        2pzue/8ypjrcuBNi7ZnaL1RDHRH8Mie+co5LINC0VE5AXswHPtQcvli3s5N7kioX
+        OZwzexC1YUD0escsnZZR/sr8J9D5zvmDtFll06OcINr173XQj4iVRwTz8OHHFQH0
+        DiDfoQ0HcmybZ1X6VxZXhTgCYKeMo/JUcNqCgrH+zF08t5sHN0dyQsCHBsczKFDE
+        yDJ4415dXN906qd+VoNqdZFl4iEHfgnZY5x4ww0/ea5C2ivEz/wsvrwVCJzR8Q4=
         -----END CERTIFICATE-----
         </ca>
         $extra
