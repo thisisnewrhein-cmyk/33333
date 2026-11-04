@@ -172,7 +172,7 @@ internal object OpenVpnProfileSanitizer {
                 return@forEach
             }
 
-            if (directive == "client") hasClient = true
+            if (directive == "client" || directive == "tls-client") hasClient = true
 
             if (directive == "dev") {
                 val device = stripInlineComment(parts.getOrNull(1).orEmpty())
