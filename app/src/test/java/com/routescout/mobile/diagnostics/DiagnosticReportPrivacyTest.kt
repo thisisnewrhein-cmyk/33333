@@ -60,6 +60,28 @@ class DiagnosticAnalyzerTest {
     }
 
     @Test
+    fun reportsBasicConnectivityAndStillDisclosesDnsLeakLimitation() {
+        val snapshot = DiagnosticSnapshot(
+            internetAvailable = true,
+            dnsLatencyMs = 12L,
+            httpsLatencyMs = 45L,
+            filteringSuspected = false,
+            ipSourcesAgree = true
+        )
+        val codes = DiagnosticAnalyzer.findings(snapshot, false, 0.0).map { it.code }
+        assertTrue(codes.contains("BASIC_CONNECTIVITY_OK"))
+        assertTrue(codes.contains("DNS_LEAK_NOT_FULLY_PROVEN"))
+    }
+
+    @Test
+    fun doesNotReportConnectivityOkWhenBaselineDataIsMissing() {
+        val snapshot = DiagnosticSnapshot()
+        val codes = DiagnosticAnalyzer.findings(snapshot, false, null).map { it.code }
+        assertTrue(codes.contains("INSUFFICIENT_BASELINE_DATA"))
+        assertFalse(codes.contains("BASIC_CONNECTIVITY_OK"))
+    }
+
+    @Test
     fun noVariationIsReturnedForOneSuccessfulSample() {
         assertNull(
             DiagnosticAnalyzer.latencyVariation(
