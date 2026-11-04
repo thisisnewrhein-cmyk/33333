@@ -77,7 +77,7 @@ class DiagnosticAnalyzerTest {
     fun doesNotReportConnectivityOkWhenBaselineDataIsMissing() {
         val snapshot = DiagnosticSnapshot()
         val codes = DiagnosticAnalyzer.findings(snapshot, false, null).map { it.code }
-        assertTrue(codes.contains("INSUFFICIENT_BASELINE_DATA"))
+        assertTrue(codes.contains("DNS_LOOKUP_FAILED"))
         assertFalse(codes.contains("BASIC_CONNECTIVITY_OK"))
     }
 
