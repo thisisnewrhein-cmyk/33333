@@ -3,6 +3,7 @@ package com.routescout.mobile.diagnostics
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Network
 import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -24,10 +25,10 @@ import javax.net.ssl.SSLHandshakeException
 class NetworkDiagnosticsRepository(context: Context) {
     private val appContext = context.applicationContext
 
-    suspend fun runQuickCheck(): DiagnosticSnapshot = withContext(Dispatchers.IO) {
+    suspend fun runQuickCheck(network: Network? = null): DiagnosticSnapshot = withContext(Dispatchers.IO) {
         val connectivityManager =
             appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = connectivityManager.activeNetwork
+        val activeNetwork = network ?: connectivityManager.activeNetwork
         val capabilities = activeNetwork?.let {
             connectivityManager.getNetworkCapabilities(it)
         }
@@ -39,7 +40,7 @@ class NetworkDiagnosticsRepository(context: Context) {
 
         val dnsStart = SystemClock.elapsedRealtime()
         val dnsLatency = try {
-            val addresses = InetAddress.getAllByName("example.com")
+            val addresses = if (network != null) network.getAllByName("example.com") else InetAddress.getAllByName("example.com")
             if (addresses.isNotEmpty()) SystemClock.elapsedRealtime() - dnsStart else null
         } catch (_: Exception) {
             null
@@ -47,7 +48,7 @@ class NetworkDiagnosticsRepository(context: Context) {
 
         val httpsStart = SystemClock.elapsedRealtime()
         val httpsLatency = try {
-            val connection = URL("https://example.com/").openConnection() as HttpsURLConnection
+            val connection = openConnection("https://example.com/", network) as HttpsURLConnection
             connection.connectTimeout = 5000
             connection.readTimeout = 5000
             connection.requestMethod = "GET"
@@ -66,16 +67,16 @@ class NetworkDiagnosticsRepository(context: Context) {
         // Probe foreign services against example.com as a neutral control.
         // A failed site is evidence of a reachability problem, not proof of ISP filtering.
         val siteChecks = coroutineScope {
-            SITE_PROBE_TARGETS.map { target -> async { probeSite(target) } }.awaitAll()
+            SITE_PROBE_TARGETS.map { target -> async { probeSite(target, network) } }.awaitAll()
         }
         val siteAssessment = SiteAccessAnalyzer.analyze(siteChecks)
 
         // Independent public-IP sources run concurrently. Their services see the
         // public IP making the request; no diagnostic report is uploaded.
         val ipResult = coroutineScope {
-            val ipv4Request = async { fetchJsonIp(IPV4_CHECK_URL) }
-            val ipv6Request = async { fetchTextIp(IPV6_CHECK_URL) }
-            val metadataRequest = async { fetchIpMetadata() }
+            val ipv4Request = async { fetchJsonIp(IPV4_CHECK_URL, network) }
+            val ipv6Request = async { fetchTextIp(IPV6_CHECK_URL, network) }
+            val metadataRequest = async { fetchIpMetadata(network) }
             PublicIpResult(
                 ipv4FromIpify = ipv4Request.await()?.takeIf { it is Inet4Address },
                 ipv6FromIpify = ipv6Request.await()?.takeIf { it is Inet6Address },
@@ -125,10 +126,37 @@ class NetworkDiagnosticsRepository(context: Context) {
         )
     }
 
-    private fun probeSite(target: SiteProbeTarget): SiteConnectivityResult {
+
+    /**
+     * Small explicit probe bound to the supplied Android VPN Network.
+     * This verifies the VPN data path rather than the process default route.
+     */
+    suspend fun probeHttpsOn(network: Network): Boolean = withContext(Dispatchers.IO) {
+        val connection = try {
+            openConnection("https://example.com/", network) as HttpsURLConnection
+        } catch (_: Exception) {
+            return@withContext false
+        }
+        connection.connectTimeout = 4_000
+        connection.readTimeout = 4_000
+        connection.requestMethod = "GET"
+        connection.useCaches = false
+        try {
+            connection.responseCode in 200..499
+        } catch (_: Exception) {
+            false
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun openConnection(url: String, network: Network?) =
+        if (network != null) network.openConnection(URL(url)) else URL(url).openConnection()
+
+    private fun probeSite(target: SiteProbeTarget, network: Network?): SiteConnectivityResult {
         val dnsStartedAt = SystemClock.elapsedRealtime()
         val dnsLatency = try {
-            InetAddress.getAllByName(target.host)
+            if (network != null) network.getAllByName(target.host) else InetAddress.getAllByName(target.host)
             SystemClock.elapsedRealtime() - dnsStartedAt
         } catch (error: Exception) {
             return SiteConnectivityResult(
@@ -140,7 +168,7 @@ class NetworkDiagnosticsRepository(context: Context) {
         }
 
         val connection = try {
-            URL(target.url).openConnection() as HttpsURLConnection
+            openConnection(target.url, network) as HttpsURLConnection
         } catch (error: Exception) {
             return SiteConnectivityResult(
                 label = target.label,
@@ -155,7 +183,7 @@ class NetworkDiagnosticsRepository(context: Context) {
         connection.requestMethod = "GET"
         connection.instanceFollowRedirects = true
         connection.useCaches = false
-        connection.setRequestProperty("User-Agent", "RouteScoutMobile/0.5.0")
+        connection.setRequestProperty("User-Agent", "RouteScoutMobile/0.7.0")
 
         val httpsStartedAt = SystemClock.elapsedRealtime()
         return try {
@@ -202,8 +230,8 @@ class NetworkDiagnosticsRepository(context: Context) {
         val url: String
     )
 
-    private fun fetchJsonIp(url: String): InetAddress? {
-        val body = fetchHttpsBody(url) ?: return null
+    private fun fetchJsonIp(url: String, network: Network?): InetAddress? {
+        val body = fetchHttpsBody(url, network) ?: return null
         val rawIp = try {
             JSONObject(body).optString("ip").takeUnless { it.isBlank() || it == "null" }
         } catch (_: Exception) {
@@ -212,11 +240,11 @@ class NetworkDiagnosticsRepository(context: Context) {
         return normalizePublicIp(rawIp)
     }
 
-    private fun fetchTextIp(url: String): InetAddress? =
-        normalizePublicIp(fetchHttpsBody(url)?.trim())
+    private fun fetchTextIp(url: String, network: Network?): InetAddress? =
+        normalizePublicIp(fetchHttpsBody(url, network)?.trim())
 
-    private fun fetchIpMetadata(): IpMetadata? {
-        val body = fetchHttpsBody(IP_METADATA_URL) ?: return null
+    private fun fetchIpMetadata(network: Network?): IpMetadata? {
+        val body = fetchHttpsBody(IP_METADATA_URL, network) ?: return null
         return try {
             val json = JSONObject(body)
             val rawIp = json.optString("ip").takeUnless { it.isBlank() || it == "null" }
@@ -234,9 +262,9 @@ class NetworkDiagnosticsRepository(context: Context) {
         }
     }
 
-    private fun fetchHttpsBody(url: String): String? {
+    private fun fetchHttpsBody(url: String, network: Network?): String? {
         val connection = try {
-            URL(url).openConnection() as HttpsURLConnection
+            openConnection(url, network) as HttpsURLConnection
         } catch (_: Exception) {
             return null
         }
