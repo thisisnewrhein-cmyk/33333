@@ -2,7 +2,7 @@ package com.routescout.mobile.vpn
 
 class WireGuardEngineAdapter(
     private val manager: WireGuardManager,
-    private val trafficProbe: suspend () -> Unit = {}
+    private val trafficProbe: suspend () -> Unit
 ) : VpnEngine {
     override val id: VpnEngineId = VpnEngineId.WIREGUARD
 
