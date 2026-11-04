@@ -55,7 +55,15 @@ interface VpnEngine {
 
     suspend fun connect(profile: String): VpnEngineStatus
 
+    /**
+     * Must be safe to call when already stopped and must release the Android VPN
+     * interface before returning. The coordinator independently verifies status().
+     */
     suspend fun disconnect()
 
+    /**
+     * isRunning must reflect ownership of the live VPN interface, not just a
+     * worker process or a service object that has not established its TUN.
+     */
     suspend fun status(): VpnEngineStatus
 }
