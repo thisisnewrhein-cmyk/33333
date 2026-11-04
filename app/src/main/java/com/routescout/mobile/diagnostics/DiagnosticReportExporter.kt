@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.content.FileProvider
 import com.routescout.mobile.vpn.VpnEngineStatus
+import com.routescout.mobile.vpn.VpnEngineId
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -89,8 +90,9 @@ class DiagnosticReportExporter(context: Context) {
                 .put("engine", vpnStatus.engineId?.name)
                 .put("running", vpnStatus.isRunning)
                 .put("verified", vpnStatus.isConnected)
-                .put("received_bytes", vpnStatus.receivedBytes)
-                .put("transmitted_bytes", vpnStatus.transmittedBytes)
+                .put("traffic_counters_available", vpnStatus.engineId == VpnEngineId.WIREGUARD)
+                .put("received_bytes", if (vpnStatus.engineId == VpnEngineId.WIREGUARD) vpnStatus.receivedBytes else null)
+                .put("transmitted_bytes", if (vpnStatus.engineId == VpnEngineId.WIREGUARD) vpnStatus.transmittedBytes else null)
                 .put(
                     "latest_handshake_age_ms",
                     vpnStatus.latestHandshakeEpochMillis?.let {
