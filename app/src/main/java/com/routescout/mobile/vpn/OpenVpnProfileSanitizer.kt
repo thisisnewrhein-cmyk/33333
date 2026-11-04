@@ -217,7 +217,7 @@ internal object OpenVpnProfileSanitizer {
                 stripInlineComment(trimmed.substringAfter("remote-cert-tls", ""))
                     .equals("server", ignoreCase = true)
         }
-        if (!hasRemoteCertTlsServer) output.appendLine("remote-cert-tls server")
+        if (!hasRemoteCertTlsServer && !hasPeerFingerprint) output.appendLine("remote-cert-tls server")
 
         // Never introduce a credential prompt when the source profile did not request it.
         if (hasAuthUserPass && output.lineSequence().none { it.trim() == "auth-user-pass" }) {
