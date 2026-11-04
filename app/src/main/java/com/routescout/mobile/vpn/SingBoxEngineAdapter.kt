@@ -33,7 +33,7 @@ class SingBoxEngineAdapter(
     )
 
     override suspend fun connect(profile: String): VpnEngineStatus {
-        val validated = SingBoxConfigValidator.validateAndNormalize(profile)
+        val validated = SingBoxConfigValidator.validateAndNormalize(profile, appContext.packageName)
         configStore.save(validated.normalizedJson)
 
         RouteScoutVpnRuntime.markStarting(appContext)
