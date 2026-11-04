@@ -16,7 +16,7 @@ class VpnGateApi(
         connection.readTimeout = READ_TIMEOUT_MS
         connection.instanceFollowRedirects = true
         connection.setRequestProperty("Accept", "text/csv, text/plain;q=0.9, */*;q=0.8")
-        connection.setRequestProperty("User-Agent", "RouteScoutMobile/0.4.0")
+        connection.setRequestProperty("User-Agent", "RouteScoutMobile/0.5.0")
 
         try {
             val statusCode = connection.responseCode

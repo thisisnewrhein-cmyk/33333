@@ -3,8 +3,8 @@ package com.routescout.mobile.vpn
 /**
  * Public metadata returned by the official VPN Gate directory.
  *
- * The Base64 OpenVPN profile is kept in memory only and is never written to
- * the repository or included in diagnostic logs.
+ * The Base64 OpenVPN profile may be kept in the app's private local cache;
+ * it is never written to the repository or included in diagnostic logs.
  */
 data class FreeVpnServer(
     val hostName: String,
